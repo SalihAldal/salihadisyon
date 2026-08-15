@@ -1,0 +1,11 @@
+{
+  "name": "@adisyon/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env.ts"
+  }
+}

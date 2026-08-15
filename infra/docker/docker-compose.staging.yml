@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adisyon-staging-postgres
+    environment:
+      POSTGRES_DB: adisyon_staging
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d adisyon_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: adisyon-staging-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_staging_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: node:20-alpine
+    container_name: adisyon-staging-api
+    working_dir: /workspace
+    env_file:
+      - ../../.env.staging
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/adisyon_staging?schema=public
+      REDIS_URL: redis://redis:6379
+    command: >
+      sh -lc "corepack enable &&
+      corepack prepare pnpm@10.0.0 --activate &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter api prisma:migrate:deploy &&
+      pnpm --filter api build &&
+      pnpm --filter api start:prod"
+    volumes:
+      - ../../:/workspace
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  admin-web:
+    image: node:20-alpine
+    container_name: adisyon-staging-admin
+    working_dir: /workspace
+    env_file:
+      - ../../.env.staging
+    command: >
+      sh -lc "corepack enable &&
+      corepack prepare pnpm@10.0.0 --activate &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter admin-web build &&
+      pnpm --filter admin-web start"
+    volumes:
+      - ../../:/workspace
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+  pos-web:
+    image: node:20-alpine
+    container_name: adisyon-staging-pos
+    working_dir: /workspace
+    env_file:
+      - ../../.env.staging
+    command: >
+      sh -lc "corepack enable &&
+      corepack prepare pnpm@10.0.0 --activate &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter pos-web build &&
+      pnpm --filter pos-web preview --host 0.0.0.0 --port 3001"
+    volumes:
+      - ../../:/workspace
+    ports:
+      - "3001:3001"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:

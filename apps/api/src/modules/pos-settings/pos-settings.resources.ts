@@ -1,0 +1,25 @@
+export const posSettingsResources = [
+  "menu-management",
+  "menu-categories",
+  "menu-products",
+  "campaigns",
+  "happy-hour",
+  "timed-discounts",
+  "qr-menu",
+  "table-sections",
+  "delivery-addresses",
+  "customers",
+  "optional-products",
+  "required-choice-groups",
+  "payment-methods",
+  "defined-devices",
+  "terminals",
+  "printers",
+  "back-screen-slider",
+  "table-colors",
+  "discount-types",
+  "preset-notes",
+  "settings",
+] as const;
+
+export type PosSettingsResource = (typeof posSettingsResources)[number];

@@ -1,0 +1,39 @@
+{
+  "name": "adisyon-saas-platform",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "kill:ports": "node ./scripts/kill-ports.mjs",
+    "kill:dev": "node ./scripts/kill-ports.mjs 3000 3001 4000",
+    "dev:admin": "pnpm --filter admin-web dev",
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:pos": "pnpm --filter pos-web dev",
+    "dev:all": "turbo run dev --filter=api --filter=admin-web --filter=pos-web",
+    "docker:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "docker:up:wait": "node ./scripts/docker-up-wait.mjs",
+    "docker:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "deploy:preflight": "node ./scripts/deploy-preflight.mjs",
+    "deploy:migrate:status": "pnpm --filter api prisma:migrate:status",
+    "deploy:migrate:audit": "node ./scripts/check-migrations.mjs",
+    "deploy:staging:up": "docker compose -f infra/docker/docker-compose.staging.yml --env-file .env.staging up -d",
+    "deploy:staging:down": "docker compose -f infra/docker/docker-compose.staging.yml --env-file .env.staging down",
+    "deploy:staging:logs": "docker compose -f infra/docker/docker-compose.staging.yml --env-file .env.staging logs -f",
+    "prisma:generate": "pnpm --filter api prisma:generate",
+    "prisma:migrate": "pnpm --filter api prisma:migrate",
+    "prisma:seed": "pnpm --filter api prisma:seed",
+    "demo:seed": "pnpm --filter api prisma:demo:seed",
+    "demo:reset": "pnpm --filter api prisma:demo:reset"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  }
+}

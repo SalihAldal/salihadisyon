@@ -1,0 +1,40 @@
+{
+  "name": "mobile-manager",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "dev": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "mobileArchitecture": {
+    "runtime": "React Native Expo + TypeScript",
+    "state": "Zustand",
+    "dataFetching": "TanStack Query",
+    "navigation": "Bottom Tabs + Native Stack",
+    "pushNotifications": "Expo Notifications",
+    "secureStorage": "expo-secure-store"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^3.0.1",
+    "@tanstack/react-query": "^5.90.21",
+    "expo": "^55.0.5",
+    "expo-constants": "^55.0.7",
+    "expo-device": "^55.0.9",
+    "expo-notifications": "^55.0.11",
+    "expo-router": "^55.0.4",
+    "expo-secure-store": "^55.0.8",
+    "expo-status-bar": "^55.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "^0.84.1",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "^4.24.0",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}
