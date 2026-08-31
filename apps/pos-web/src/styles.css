@@ -241,7 +241,7 @@ select {
 
 .pos-user-pill__name {
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 750;
   color: #0f172a;
   white-space: nowrap;
   overflow: hidden;
@@ -283,7 +283,7 @@ select {
 .pos-tables-screen__title h2 {
   margin: 0;
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 850;
   letter-spacing: -0.02em;
 }
 
@@ -328,13 +328,13 @@ select {
 
 .pos-stat-card__label {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 750;
   color: #334155;
 }
 
 .pos-stat-card__value {
   font-size: 20px;
-  font-weight: 900;
+  font-weight: 850;
   letter-spacing: -0.02em;
 }
 
@@ -412,7 +412,7 @@ select {
 
 .pos-table-card__code {
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 850;
   letter-spacing: -0.02em;
 }
 
@@ -874,7 +874,7 @@ select {
 
 /* Table detail modal (desktop + mobile) */
 .pos-table-modal {
-  width: min(1120px, calc(100vw - 44px));
+  width: min(1280px, calc(100vw - 44px));
   max-height: min(86vh, 860px);
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
@@ -897,7 +897,7 @@ select {
   margin: 0;
   font-size: 11px;
   letter-spacing: 0.12em;
-  font-weight: 900;
+  font-weight: 800;
   color: #94a3b8;
 }
 
@@ -910,7 +910,7 @@ select {
 .pos-table-modal__head-title h2 {
   margin: 0;
   font-size: 20px;
-  font-weight: 1000;
+  font-weight: 850;
   letter-spacing: -0.02em;
 }
 
@@ -931,7 +931,7 @@ select {
   border: 1px solid var(--pos-border);
   border-radius: 14px;
   background: #fff;
-  font-weight: 900;
+  font-weight: 800;
   font-size: 13px;
   cursor: pointer;
   transition: 160ms ease;
@@ -987,13 +987,13 @@ select {
 
 .pos-meta-card__label {
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 800;
   color: #94a3b8;
 }
 
 .pos-meta-card__value {
   font-size: 14px;
-  font-weight: 1000;
+  font-weight: 850;
   color: #0f172a;
 }
 
@@ -1030,7 +1030,7 @@ select {
   border: 0;
   background: transparent;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 800;
   color: #64748b;
   cursor: pointer;
   padding: 10px 2px;
@@ -1068,7 +1068,7 @@ select {
 
 .pos-card__head strong {
   font-size: 14px;
-  font-weight: 1000;
+  font-weight: 850;
 }
 
 .pos-card__head-actions {
@@ -1139,7 +1139,7 @@ select {
 .pos-orders-table__product strong {
   display: block;
   font-size: 13px;
-  font-weight: 1000;
+  font-weight: 850;
 }
 
 .pos-orders-table__product small {
@@ -1218,7 +1218,7 @@ select {
 }
 
 .pos-summary__row strong {
-  font-weight: 1000;
+  font-weight: 850;
   color: #0f172a;
 }
 
@@ -1251,7 +1251,7 @@ select {
   border-radius: 14px;
   background: #fff;
   padding: 10px 10px;
-  font-weight: 1000;
+  font-weight: 850;
   font-size: 12px;
   cursor: pointer;
   display: flex;
@@ -1289,9 +1289,132 @@ select {
 .pos-footer-primary {
   min-height: 46px;
   border-radius: 14px;
-  font-weight: 1000;
+  font-weight: 850;
   cursor: pointer;
   padding: 0 14px;
+}
+
+.pos-table-modal__content--single {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.pos-ticket-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.pos-ticket-kv {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.pos-ticket-kv span {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 800;
+}
+
+.pos-ticket-kv strong {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pos-payment-stack {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.pos-payment-hero {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.88));
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pos-payment-hero__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.pos-payment-hero__value {
+  display: block;
+  margin-top: 2px;
+  font-size: 20px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  color: #e11d48;
+}
+
+.pos-payment-split__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.pos-payment-split__head strong {
+  font-weight: 850;
+}
+
+.pos-payment-split__head span {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 800;
+}
+
+.pos-payment-split__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pos-notes {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.pos-note-row {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  padding: 12px;
+}
+
+.pos-note-row strong {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pos-note-row small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .pos-table-modal__content--single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pos-ticket-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .pos-footer-menu {

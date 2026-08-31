@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { formatCurrency, formatTableDuration } from "../pos-helpers";
 
-type TabKey = "orders" | "ticket" | "payment" | "split" | "notes";
+type TabKey = "orders" | "ticket" | "payment" | "notes";
 
 function Icon({ d }: { d: string }) {
   return (
@@ -67,6 +67,27 @@ export function PosTableDetailModal({
 }) {
   const [tab, setTab] = useState<TabKey>("orders");
   const items = useMemo(() => ((ticket?.items as Array<Record<string, any>> | undefined) ?? []), [ticket]);
+  const noteItems = useMemo(() => {
+    const notes: Array<{ key: string; label: string; meta?: string }> = [];
+    const ticketNote = String(ticket?.note ?? ticket?.notes ?? "").trim();
+    if (ticketNote) {
+      notes.push({ key: "ticket-note", label: ticketNote, meta: "Adisyon Notu" });
+    }
+    for (const item of items) {
+      const itemId = String(item.id ?? item.productId ?? item.productName ?? Math.random());
+      const rawNotes = Array.isArray(item.notes) ? item.notes : item.note ? [item.note] : [];
+      for (const [idx, raw] of rawNotes.entries()) {
+        const label = String(raw ?? "").trim();
+        if (!label) continue;
+        notes.push({
+          key: `${itemId}-${idx}`,
+          label,
+          meta: String(item.productName ?? item.name ?? "Ürün"),
+        });
+      }
+    }
+    return notes;
+  }, [items, ticket]);
   const openedAt = ticket?.openedAt ? String(ticket.openedAt) : null;
   const duration = openedAt ? formatTableDuration(openedAt) : null;
   const coverCount = Number(ticket?.coverCount ?? 0) || null;
@@ -136,9 +157,6 @@ export function PosTableDetailModal({
         </button>
         <button type="button" className={`pos-tab ${tab === "payment" ? "active" : ""}`} onClick={() => setTab("payment")}>
           Ödeme
-        </button>
-        <button type="button" className={`pos-tab ${tab === "split" ? "active" : ""}`} onClick={() => setTab("split")}>
-          Böl & Paylaş
         </button>
         <button type="button" className={`pos-tab ${tab === "notes" ? "active" : ""}`} onClick={() => setTab("notes")}>
           Notlar
@@ -281,9 +299,180 @@ export function PosTableDetailModal({
             </section>
           </aside>
         </div>
+      ) : tab === "ticket" ? (
+        <div className="pos-table-modal__content pos-table-modal__content--single">
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Adisyon</strong>
+            </header>
+            <div className="pos-ticket-grid">
+              <div className="pos-ticket-kv">
+                <span>Adisyon No</span>
+                <strong>{String(ticket?.ticketName ?? ticket?.id ?? "-")}</strong>
+              </div>
+              <div className="pos-ticket-kv">
+                <span>Masa</span>
+                <strong>{tableLabel}</strong>
+              </div>
+              <div className="pos-ticket-kv">
+                <span>Durum</span>
+                <strong>{statusLabel ?? "-"}</strong>
+              </div>
+              <div className="pos-ticket-kv">
+                <span>Açılış</span>
+                <strong>{openedAt ? new Date(openedAt).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "-"}</strong>
+              </div>
+              <div className="pos-ticket-kv">
+                <span>Süre</span>
+                <strong>{duration ?? "-"}</strong>
+              </div>
+              <div className="pos-ticket-kv">
+                <span>Kişi</span>
+                <strong>{coverCount ? String(coverCount) : "-"}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Özet</strong>
+            </header>
+            <div className="pos-summary">
+              <div className="pos-summary__row">
+                <span>Ara Toplam</span>
+                <strong>{money(ticket?.subtotal ?? grandTotal)}</strong>
+              </div>
+              <div className="pos-summary__row">
+                <span>İndirim</span>
+                <strong className="pos-summary__muted">-{money(ticket?.discountTotal ?? 0)}</strong>
+              </div>
+              <div className="pos-summary__row">
+                <span>Hizmet</span>
+                <strong>{money(ticket?.serviceCharge ?? 0)}</strong>
+              </div>
+              <div className="pos-summary__row">
+                <span>KDV</span>
+                <strong>{money(ticket?.taxTotal ?? 0)}</strong>
+              </div>
+              <div className="pos-summary__divider" />
+              <div className="pos-summary__row pos-summary__row--total">
+                <span>Genel Toplam</span>
+                <strong>{money(grandTotal)}</strong>
+              </div>
+              <div className="pos-summary__row">
+                <span>Ödenen</span>
+                <strong className="pos-summary__muted">{money(paidTotal)}</strong>
+              </div>
+              <div className="pos-summary__row pos-summary__row--remaining">
+                <span>Kalan</span>
+                <strong>{money(remaining)}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : tab === "payment" ? (
+        <div className="pos-table-modal__content pos-table-modal__content--single">
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Ödeme</strong>
+            </header>
+            <div className="pos-payment-stack">
+              <div className="pos-payment-hero">
+                <div>
+                  <span className="pos-payment-hero__label">Kalan Tutar</span>
+                  <strong className="pos-payment-hero__value">{money(remaining)}</strong>
+                </div>
+                <button type="button" className="pos-footer-primary" onClick={onOpenPayment} disabled={pending || !ticket}>
+                  Ödeme Al
+                </button>
+              </div>
+
+              <div className="pos-payment-split">
+                <div className="pos-payment-split__head">
+                  <strong>Böl & Paylaş</strong>
+                  <span>Ödeme ekranında kullanılacak</span>
+                </div>
+                <div className="pos-payment-split__grid">
+                  <button type="button" className="pos-quick" onClick={onOpenPayment} disabled={pending || !ticket}>
+                    <span className="pos-quick__icon">
+                      <Icon d={icons.money} />
+                    </span>
+                    Eşit Böl
+                  </button>
+                  <button type="button" className="pos-quick" onClick={onOpenPayment} disabled={pending || !ticket}>
+                    <span className="pos-quick__icon">
+                      <Icon d={icons.users} />
+                    </span>
+                    Kişiye Böl
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Ödeme Özeti</strong>
+            </header>
+            <div className="pos-summary">
+              <div className="pos-summary__row pos-summary__row--total">
+                <span>Genel Toplam</span>
+                <strong>{money(grandTotal)}</strong>
+              </div>
+              <div className="pos-summary__row">
+                <span>Ödenen</span>
+                <strong className="pos-summary__muted">{money(paidTotal)}</strong>
+              </div>
+              <div className="pos-summary__row pos-summary__row--remaining">
+                <span>Kalan</span>
+                <strong>{money(remaining)}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
       ) : (
-        <div className="pos-table-modal__placeholder">
-          <p>Bu sekme bu tasarım turunda sadece UI iskeleti olarak hazır. İlgili işlem için “İşlem” menüsünü kullanabilirsin.</p>
+        <div className="pos-table-modal__content pos-table-modal__content--single">
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Notlar</strong>
+              <div className="pos-card__head-actions">
+                <button type="button" className="pos-ghost-btn" onClick={onOpenNote} disabled={pending}>
+                  <Icon d={icons.note} /> Not Ekle
+                </button>
+              </div>
+            </header>
+            <div className="pos-notes">
+              {noteItems.length === 0 ? <div className="pos-empty">Not bulunamadı.</div> : null}
+              {noteItems.map((note) => (
+                <div key={note.key} className="pos-note-row">
+                  <div>
+                    <strong>{note.label}</strong>
+                    {note.meta ? <small>{note.meta}</small> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="pos-card">
+            <header className="pos-card__head">
+              <strong>Hızlı</strong>
+            </header>
+            <div className="pos-quick-grid">
+              <button type="button" className="pos-quick" onClick={onOpenNote} disabled={pending}>
+                <span className="pos-quick__icon">
+                  <Icon d={icons.note} />
+                </span>
+                Not Ekle
+              </button>
+              <button type="button" className="pos-quick" onClick={onPrint} disabled={pending}>
+                <span className="pos-quick__icon">
+                  <Icon d={icons.print} />
+                </span>
+                Yazdır
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
