@@ -12,7 +12,7 @@ import {
 import { emitPosToast, getPosToastEventName, type PosToastPayload } from "./feedback";
 import { PosLoginScreen } from "./components/pos-auth";
 import { WaiterTableLobby } from "./components/waiter-table-lobby";
-import { TicketHierarchyView } from "./components/ticket-hierarchy-view";
+import { PosTableDetailModal } from "./components/table-detail-modal";
 import {
   CatalogContent,
   CatalogPane,
@@ -2877,7 +2877,15 @@ export function App() {
                   className={activeFloor === floor.key ? "active" : ""}
                   onClick={() => setActiveFloor(floor.key)}
                 >
-                  {floor.label}
+                  <span className="pos-floor-tab__icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24">
+                      <path
+                        fill="currentColor"
+                        d="M7 21h10v-2H7v2Zm0-4h10v-2H7v2Zm0-4h10v-2H7v2Zm10-6V3H7v4H5V3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4h-2Z"
+                      />
+                    </svg>
+                  </span>
+                  <span className="pos-floor-tab__label">{floor.label}</span>
                 </button>
               ))}
             </div>
@@ -3248,209 +3256,36 @@ export function App() {
         eyebrow="Adisyon"
         title="Adisyon Detay"
         className="pos-drawer--ticket-modern"
+        hideHeader
         closeLabel="×"
         onClose={closeDrawer}
       >
-        <div className="ticket-modal">
-          <div className="ticket-header">
-            <div>
-              <h2>{mode === "TABLE" ? "Masa Servisi" : mode === "DELIVERY" ? "Paket Servis" : mode === "TAKEAWAY" ? "Gel-Al" : "Self Servis"}</h2>
-              <p className="ticket-header__meta">
-                {`Adisyon: ${selectedTicket?.ticketName ?? "-"} / Masa: ${selectedTicket?.tableName ?? "-"} / Musteri: ${selectedTicket?.customerName ?? "-"}`}
-                {selectedTicket?.coverCount ? ` / ${selectedTicket.coverCount} kisi` : ""}
-                {selectedTicket?.openedAt ? ` / Sure: ${formatTableDuration(String(selectedTicket.openedAt)) ?? "-"}` : ""}
-                {selectedTicket?.billRequestedAt ? " / Hesap istendi" : ""}
-              </p>
-              {isWaiterMode && selectedTicket?.status ? (
-                <span className={`waiter-ticket-status waiter-ticket-status--${getTicketStatusTone(String(selectedTicket.status))} waiter-ticket-header__status`}>
-                  {formatTicketStatus(String(selectedTicket.status))}
-                </span>
-              ) : null}
-            </div>
-            {!isWaiterMode ? (
-              <div className="ticket-header__badges">
-                <button className="ticket-menu-button" type="button" onClick={() => openDrawer("actions")}>
-                  Islem
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="ticket-modal__catalog">
-            <CategoryStrip>
-              <button
-                className={`category-pill ${activeTopCategoryId === "all" ? "active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setActiveTopCategoryId("all");
-                  setActiveSubCategoryId("all");
-                }}
-              >
-                Tum Urunler
-              </button>
-              {topCategories.map((category) => (
-                <button
-                  key={String(category.id)}
-                  className={`category-pill ${activeTopCategoryId === String(category.id) ? "active" : ""}`}
-                  type="button"
-                  onClick={() => {
-                    setActiveTopCategoryId(String(category.id));
-                    setActiveSubCategoryId("all");
-                  }}
-                >
-                  {String(category.name)}
-                </button>
-              ))}
-            </CategoryStrip>
-            <SubcategoryStrip>
-              <button className={`subcategory-pill ${activeSubCategoryId === "all" ? "active" : ""}`} type="button" onClick={() => setActiveSubCategoryId("all")}>
-                Tumu
-              </button>
-              {subCategories.map((category) => (
-                <button
-                  key={String(category.id)}
-                  className={`subcategory-pill ${activeSubCategoryId === String(category.id) ? "active" : ""}`}
-                  type="button"
-                  onClick={() => setActiveSubCategoryId(String(category.id))}
-                >
-                  {String(category.name)}
-                </button>
-              ))}
-            </SubcategoryStrip>
-            <div className="ticket-modal__products">
-              {pendingOps.submitProduct ? (
-                <div className="waiter-lobby__loading">Urun ekleniyor...</div>
-              ) : pagedProducts.length ? (
-                pagedProducts.map((product) => (
-                  <PosProductCard key={String(product.id)} product={product} onSelect={() => openProductDrawer(product)} />
-                ))
-              ) : (
-                <div className="waiter-lobby__empty">Bu kategoride urun bulunamadi.</div>
-              )}
-            </div>
-          </div>
-
-          {!isWaiterMode ? (
-            <div className="ticket-quick-actions">
-            <button type="button" onClick={() => toggleDrawer("history")} disabled={anyPending}>
-              <span className="ticket-quick-actions__icon">G</span>
-              <span>Gecmis</span>
-            </button>
-              <button type="button" onClick={() => void handlePrint("receipt")} aria-label="Yazdir" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">Y</span>
-                <span>Fis</span>
-              </button>
-              {canDispatchPrinter ? (
-              <button type="button" onClick={() => void handlePrint("kitchen")} aria-label="Mutfak" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">M</span>
-                <span>Mutfak</span>
-              </button>
-              ) : null}
-              <button type="button" onClick={() => void handlePrint("label")} aria-label="Etiket" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">E</span>
-                <span>Etiket</span>
-              </button>
-              <button type="button" onClick={() => openDrawer("register")} aria-label="Kasa" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">K</span>
-                <span>Kasa</span>
-              </button>
-              {canViewCancelList ? (
-              <button type="button" onClick={() => openDrawer("cancelList")} aria-label="Iptal Listesi" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">I</span>
-                <span>Iptaller</span>
-              </button>
-              ) : null}
-              <button type="button" onClick={() => openDrawer("note")} aria-label="Not" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">N</span>
-                <span>Not</span>
-              </button>
-            </div>
-          ) : (
-            <div className="ticket-quick-actions">
-              {canDispatchPrinter ? (
-                <button type="button" onClick={() => void handlePrint("kitchen")} aria-label="Mutfak" disabled={anyPending}>
-                  <span className="ticket-quick-actions__icon">M</span>
-                  <span>Mutfak</span>
-                </button>
-              ) : null}
-              <button type="button" onClick={() => openDrawer("note")} aria-label="Not" disabled={anyPending}>
-                <span className="ticket-quick-actions__icon">N</span>
-                <span>Not</span>
-              </button>
-            </div>
-          )}
-
-          {isWaiterMode && isCurrentTicketLockedForWaiter ? (
-            <div className="status status--warning">Bu adisyon icin duzenleme kilitli. Sadece yeni urun ekleyebilirsin.</div>
-          ) : null}
-
-          <div className="ticket-items ticket-items--hierarchy">
-            <TicketHierarchyView
-              ticket={selectedTicket}
-              tableTickets={selectedTableOpenTickets}
-              tableLabel={activeTableId ? selectedTableLabel : undefined}
-              categories={categories}
-              productLookup={productLookup}
-              isWaiterMode={isWaiterMode}
-              canMutateItems={canMutateCurrentTicketItems}
-              selectedItemId={selectedItemId}
-              pending={anyPending}
-              onSelectTicket={(ticketId) => void handleSelectTicketFromPicker(ticketId)}
-              onCreateTicket={!isWaiterMode ? () => void handleCreateTableTicket() : undefined}
-              onSelectItem={setSelectedItemId}
-              onChangeQuantity={(item, diff) => void changeQuantity(item, diff)}
-              onRemoveItem={(item) => {
-                if (!canMutateCurrentTicketItems) {
-                  setError("Garson modunda bu adisyon icin urun silme kilitli.");
-                  return;
-                }
-                if (!selectedTicket) return;
-                setSelectedItemId(String(item.id));
-                openConfirm("Urun Sil", "Bu urunu adisyondan silmek istiyor musun?", async () => {
-                  await posApi.removeItem(session.accessToken, String(selectedTicket.id), String(item.id));
-                  await loadAll(branchId, String(selectedTicket.id));
-                });
-              }}
-              footer={
-                isWaiterMode && selectedTicket ? (
-                  <div className="waiter-ticket-footer">
-                    <button
-                      type="button"
-                      className="waiter-send-kitchen"
-                      disabled={anyPending || waiterTicketItemCount <= 0 || Boolean(pendingOps.sendKitchen)}
-                      onClick={() => void handleSendToKitchen()}
-                    >
-                      {pendingOps.sendKitchen ? "Siparis gonderiliyor..." : "Mutfağa Gönder"}
-                    </button>
-                    <button
-                      type="button"
-                      className="waiter-bill-request"
-                      disabled={anyPending || Boolean(selectedTicket.billRequestedAt) || Boolean(pendingOps.requestBill)}
-                      onClick={() => void handleRequestBill()}
-                    >
-                      {pendingOps.requestBill ? "Gonderiliyor..." : selectedTicket.billRequestedAt ? "Hesap Istendi" : "Hesap Istendi"}
-                    </button>
-                  </div>
-                ) : undefined
-              }
-            />
-          </div>
-
-          {!isWaiterMode ? (
-            <div className="pos-inline-actions">
-              <button
-                type="button"
-                onClick={() => openFinancialConfirm("Adisyon Iptal", "Adisyon iptal edilecek.", handleVoid)}
-                disabled={!selectedTicket}
-              >
-                Iptal Et
-              </button>
-              {canManagePayments ? (
-                <button className="primary" type="button" onClick={() => openDrawer("payment")} disabled={!selectedTicket || anyPending}>Odeme Al</button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <PosTableDetailModal
+          ticket={selectedTicket}
+          tableLabel={activeTableId ? selectedTableLabel : "Masa"}
+          statusLabel={selectedTicket?.status ? formatTicketStatus(String(selectedTicket.status)) : null}
+          pending={anyPending}
+          canMutateItems={canMutateCurrentTicketItems}
+          onClose={closeDrawer}
+          onOpenActions={() => openDrawer("actions")}
+          onOpenHistory={() => openDrawer("history")}
+          onOpenNote={() => openDrawer("note")}
+          onPrint={() => void handlePrint("receipt")}
+          onOpenPayment={() => openDrawer("payment")}
+          onChangeQuantity={(item, diff) => void changeQuantity(item, diff)}
+          onRemoveItem={(item) => {
+            if (!canMutateCurrentTicketItems) {
+              setError("Garson modunda bu adisyon icin urun silme kilitli.");
+              return;
+            }
+            if (!selectedTicket) return;
+            setSelectedItemId(String(item.id));
+            openConfirm("Urun Sil", "Bu urunu adisyondan silmek istiyor musun?", async () => {
+              await posApi.removeItem(session.accessToken, String(selectedTicket.id), String(item.id));
+              await loadAll(branchId, String(selectedTicket.id));
+            });
+          }}
+        />
       </PaymentDrawer>
 
       <PaymentDrawer
@@ -4394,6 +4229,51 @@ export function App() {
           </div>
         ) : null}
       </PaymentDrawer>
+
+      <nav className="pos-bottom-nav" aria-label="Alt menü">
+        <button type="button" className="pos-bottom-nav__item pos-bottom-nav__item--active" onClick={closeDrawer}>
+          <span className="pos-bottom-nav__icon" aria-hidden="true">
+            ▦
+          </span>
+          <span className="pos-bottom-nav__label">Masalar</span>
+        </button>
+        <button
+          type="button"
+          className="pos-bottom-nav__item"
+          onClick={() => {
+            openDrawer("history");
+          }}
+        >
+          <span className="pos-bottom-nav__icon" aria-hidden="true">
+            ≡
+          </span>
+          <span className="pos-bottom-nav__label">Adisyonlar</span>
+        </button>
+        <button
+          type="button"
+          className="pos-bottom-nav__item"
+          onClick={() => {
+            openDrawer("pending");
+          }}
+        >
+          <span className="pos-bottom-nav__icon" aria-hidden="true">
+            ⏱
+          </span>
+          <span className="pos-bottom-nav__label">Siparişler</span>
+        </button>
+        <button
+          type="button"
+          className="pos-bottom-nav__item"
+          onClick={() => {
+            openDrawer("actions");
+          }}
+        >
+          <span className="pos-bottom-nav__icon" aria-hidden="true">
+            ⦿
+          </span>
+          <span className="pos-bottom-nav__label">Profil</span>
+        </button>
+      </nav>
 
       {financialConfirm.onConfirm ? (
         <div className="pos-confirm-backdrop" onClick={() => setFinancialConfirm({ title: "", message: "", reason: "", onConfirm: null })}>
