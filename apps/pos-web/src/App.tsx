@@ -2628,6 +2628,26 @@ export function App() {
     });
   }
 
+  const isWaiterMode = session ? isWaiterSession(session) : false;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("pos-waiter-mode", isWaiterMode);
+    return () => {
+      document.body.classList.remove("pos-waiter-mode");
+    };
+  }, [isWaiterMode]);
+
+  const filteredCancelList = useMemo(() => {
+    const query = cancelListSearch.trim().toLowerCase();
+    if (!query) return cancelListRows;
+    return cancelListRows.filter((row) =>
+      [row.actionLabel, row.tableName, row.productName, row.ticketId, row.userName].some((value) =>
+        String(value).toLowerCase().includes(query),
+      ),
+    );
+  }, [cancelListRows, cancelListSearch]);
+
   if (!session) {
     return <PosLoginScreen onSubmit={handleLogin} loading={loading} error={error} />;
   }
@@ -2786,7 +2806,6 @@ export function App() {
   const registerExpectedCard = Number(registerResult?.summary?.paymentBreakdown?.card ?? 0);
   const registerExpectedMobile = Number(registerResult?.summary?.paymentBreakdown?.mobile ?? 0);
   const openingCashValue = roundCurrency(Number(registerForm.openingCash));
-  const isWaiterMode = isWaiterSession(session);
   const canManagePayments = hasSessionPermission(session, "payment.manage");
   const canManageExpenses = hasSessionPermission(session, "expense.manage");
   const canOpenRegisterPermission = hasSessionPermission(session, "register.open");
@@ -2801,28 +2820,12 @@ export function App() {
   const canViewConnections = hasSessionPermission(session, "device.view");
   const canViewCancelList = hasSessionPermission(session, "reports.view");
 
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.body.classList.toggle("pos-waiter-mode", isWaiterMode);
-    return () => {
-      document.body.classList.remove("pos-waiter-mode");
-    };
-  }, [isWaiterMode]);
   const isCurrentTicketLockedForWaiter = isWaiterMode && selectedTicket?.id ? waiterLockedTicketIds.includes(String(selectedTicket.id)) : false;
   const canMutateCurrentTicketItems = !isWaiterMode;
   const canOpenRegister = canOpenRegisterPermission && !anyPending && Number.isFinite(openingCashValue) && openingCashValue >= 0;
   const expenseDescription = expenseForm.description.trim();
   const expenseAmountValue = roundCurrency(Number(expenseForm.amount));
   const canCreateExpense = canManageExpenses && !anyPending && expenseDescription.length > 0 && Number.isFinite(expenseAmountValue) && expenseAmountValue > 0;
-  const filteredCancelList = useMemo(() => {
-    const query = cancelListSearch.trim().toLowerCase();
-    if (!query) return cancelListRows;
-    return cancelListRows.filter((row) =>
-      [row.actionLabel, row.tableName, row.productName, row.ticketId, row.userName].some((value) =>
-        String(value).toLowerCase().includes(query),
-      ),
-    );
-  }, [cancelListRows, cancelListSearch]);
 
   return (
     <div className="pos-shell pos-shell--modalized">
