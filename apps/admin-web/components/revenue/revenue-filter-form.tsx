@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AdminButton, AdminField, AdminFilterPanel, AdminInput, AdminSelect, AdminStatusBadge } from "../ui/admin-ui";
 
 interface RevenueFilterFormProps {
   branchOptions?: Array<{ id: string; name: string }>;
@@ -70,101 +71,91 @@ export function RevenueFilterForm({ branchOptions = [], includeBranchSearch = fa
   }
 
   return (
-    <section className="admin-surface admin-filter-panel admin-reference-filters">
-      <div className="admin-section-head">
-        <div>
-          <p className="admin-kicker">Hizli Tarih</p>
-          <h3>Ciro akisini hizli filtrele</h3>
-        </div>
+    <AdminFilterPanel
+      kicker="Filtre"
+      title="Ciro filtresi"
+      description="Şube, tarih aralığı ve gruplama seçimine göre raporlar güncellenir."
+      badge={preset ? <AdminStatusBadge tone="info">{preset === "today" ? "Bugün" : preset === "last7" ? "Son 7 Gün" : preset === "last30" ? "Son 30 Gün" : "Bu Ay"}</AdminStatusBadge> : undefined}
+      actions={
         <div className="admin-button-row">
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("today")}>
-            Bugun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("last7")}>
-            Son 7 Gun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("last30")}>
-            Son 30 Gun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("thisMonth")}>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("today")}>
+            Bugün
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("last7")}>
+            Son 7 Gün
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("last30")}>
+            Son 30 Gün
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("thisMonth")}>
             Bu Ay
-          </button>
+          </AdminButton>
         </div>
-      </div>
+      }
+      className="admin-filter-panel--toolbar"
+    >
       <div className="admin-form-grid" onKeyDown={(event) => (event.key === "Enter" ? applyFilters() : undefined)}>
         {branchOptions.length > 0 ? (
-          <label className="admin-field">
-            <span>Sube</span>
-            <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+          <AdminField label="Sube">
+            <AdminSelect value={branchId} onChange={(event) => setBranchId(event.target.value)}>
               <option value="">Tum subeler</option>
               {branchOptions.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branch.name}
                 </option>
               ))}
-            </select>
-          </label>
+            </AdminSelect>
+          </AdminField>
         ) : null}
 
-        <label className="admin-field">
-          <span>Baslangic</span>
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-        </label>
+        <AdminField label="Baslangic">
+          <AdminInput type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Bitis</span>
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-        </label>
+        <AdminField label="Bitis">
+          <AdminInput type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Grup</span>
-          <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
+        <AdminField label="Grup">
+          <AdminSelect value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
             <option value="day">Gun</option>
             <option value="week">Hafta</option>
             <option value="month">Ay</option>
-          </select>
-        </label>
+          </AdminSelect>
+        </AdminField>
 
         {includeBranchSearch ? (
           <>
-            <label className="admin-field">
-              <span>Sube Ara</span>
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Sube ismi ara" />
-            </label>
+            <AdminField label="Sube Ara">
+              <AdminInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Sube ismi ara" />
+            </AdminField>
 
-            <label className="admin-field">
-              <span>Siralama</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+            <AdminField label="Siralama">
+              <AdminSelect value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                 <option value="revenue">Ciro</option>
                 <option value="ticketCount">Adisyon</option>
                 <option value="averageBasket">Ort. Sepet</option>
-              </select>
-            </label>
+              </AdminSelect>
+            </AdminField>
 
-            <label className="admin-field">
-              <span>Yon</span>
-              <select value={sortDirection} onChange={(event) => setSortDirection(event.target.value)}>
+            <AdminField label="Yon">
+              <AdminSelect value={sortDirection} onChange={(event) => setSortDirection(event.target.value)}>
                 <option value="desc">Azalan</option>
                 <option value="asc">Artan</option>
-              </select>
-            </label>
+              </AdminSelect>
+            </AdminField>
           </>
         ) : null}
-
-        <label className="admin-field">
-          <span>Preset</span>
-          <input value={preset} readOnly placeholder="Bugun / Son 7 Gun / Son 30 Gun / Bu Ay" />
-        </label>
       </div>
 
       <div className="admin-filter-actions">
-        <button className="admin-outline-button" type="button" onClick={clearFilters}>
+        <AdminButton variant="outline" onClick={clearFilters}>
           Sifirla
-        </button>
-        <button className="admin-primary-button" type="button" onClick={applyFilters}>
+        </AdminButton>
+        <AdminButton variant="primary" onClick={applyFilters}>
           Filtreleri Uygula
-        </button>
+        </AdminButton>
       </div>
-    </section>
+    </AdminFilterPanel>
   );
 }

@@ -9,7 +9,7 @@ function resolveApiBase() {
   const hostUri = Constants.expoConfig?.hostUri ?? Constants.manifest2?.extra?.expoClient?.hostUri;
   if (hostUri) {
     const host = hostUri.split(":")[0];
-    return `http://${host}:4000/api/v1`;
+    return `http://${host}:4100/api/v1`;
   }
 
   throw new Error("Mobil API URL tanimli degil. Expo extra.apiUrl veya hostUri gerekli.");

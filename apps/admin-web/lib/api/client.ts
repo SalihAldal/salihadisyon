@@ -138,10 +138,28 @@ function createTimeoutController(timeoutMs = REQUEST_TIMEOUT_MS) {
   return { controller, timeoutId };
 }
 
+function safeIdempotencyKey() {
+  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
+  }
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoObj.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex
+      .slice(8, 10)
+      .join("")}-${hex.slice(10, 16).join("")}`;
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+}
+
 function buildRequestHeaders(method: string, init?: RequestInit, overrides?: Record<string, string>) {
   return {
     "Content-Type": "application/json",
-    ...(method === "GET" ? {} : { "Idempotency-Key": crypto.randomUUID(), "X-Device-Label": "admin-web" }),
+    ...(method === "GET" ? {} : { "Idempotency-Key": safeIdempotencyKey(), "X-Device-Label": "admin-web" }),
     ...(init?.headers ?? {}),
     ...(overrides ?? {}),
   };
@@ -831,6 +849,11 @@ export interface AuditLogsResponse {
     entityType: string;
     entityId: string | null;
     payload: Record<string, unknown> | null;
+    oldValues?: Record<string, unknown> | null;
+    newValues?: Record<string, unknown> | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    deviceInfo?: Record<string, unknown> | null;
     createdAt: string;
     user: {
       id: string;
@@ -838,6 +861,90 @@ export interface AuditLogsResponse {
       email: string;
     } | null;
   }>;
+}
+
+export interface BranchRecord {
+  id: string;
+  companyId: string;
+  name: string;
+  code: string;
+  city: string | null;
+  district: string | null;
+  addressLine: string | null;
+  phone: string | null;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  company?: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface CreateBranchPayload {
+  companyId: string;
+  name: string;
+  code: string;
+  city?: string;
+  district?: string;
+  addressLine?: string;
+  phone?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateBranchPayload {
+  name?: string;
+  code?: string;
+  city?: string | null;
+  district?: string | null;
+  addressLine?: string | null;
+  phone?: string | null;
+  isActive?: boolean;
+}
+
+export interface CompanyRecord {
+  id: string;
+  name: string;
+  legalName: string | null;
+  taxNumber: string | null;
+  timezone: string | null;
+  currency: string | null;
+  subscriptionState?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  branches?: BranchRecord[];
+}
+
+export interface CreateCompanyPayload {
+  name: string;
+  legalName?: string;
+  taxNumber?: string;
+  timezone?: string;
+  currency?: string;
+}
+
+export interface UpdateCompanyPayload {
+  name?: string;
+  legalName?: string | null;
+  taxNumber?: string | null;
+  timezone?: string | null;
+  currency?: string | null;
+}
+
+export interface IamRoleRecord {
+  id: string;
+  name: string;
+  key: string;
+  description?: string | null;
+  permissions?: string[];
+  isSystem?: boolean;
+}
+
+export interface IamPermissionRecord {
+  key: string;
+  label?: string;
+  domain?: string;
+  description?: string | null;
 }
 
 function buildQuery(params?: Record<string, string | number | boolean | undefined | null>) {
@@ -852,23 +959,58 @@ function buildQuery(params?: Record<string, string | number | boolean | undefine
   return query ? `?${query}` : "";
 }
 
+function readPublicEnv(key: "NEXT_PUBLIC_API_URL" | "NEXT_PUBLIC_SOCKET_URL") {
+  if (typeof process !== "undefined" && process.env[key]) {
+    return String(process.env[key]).trim();
+  }
+  return "";
+}
+
+function readRuntimeApiBase() {
+  if (typeof window !== "undefined") {
+    const injected = (window as Window & { __ADISYON_API_BASE__?: string }).__ADISYON_API_BASE__;
+    if (typeof injected === "string" && injected.trim()) {
+      return injected.trim();
+    }
+  }
+  return "";
+}
+
+function toAbsoluteApiBase(pathOrUrl: string) {
+  const trimmed = pathOrUrl.trim().replace(/\/$/, "");
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (typeof window === "undefined") {
+    return trimmed;
+  }
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return `${window.location.origin}${path}`;
+}
+
 function resolveApiBaseUrl() {
-  const configured = (runtimeConfig.apiUrl ?? "").trim();
+  const configured = (readRuntimeApiBase() || readPublicEnv("NEXT_PUBLIC_API_URL") || runtimeConfig.apiUrl || "").trim();
+
+  if (typeof window !== "undefined") {
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (isLocalhost && !configured.startsWith("http")) {
+      const path = configured.startsWith("/") ? configured : "/api/v1";
+      return `http://localhost:4100${path}`.replace(/\/$/, "");
+    }
+
+    if (configured) {
+      return toAbsoluteApiBase(configured);
+    }
+
+    const fallbackPath = window.location.pathname.startsWith("/adisyon/admin") ? "/adisyon/admin/backend/v1" : "/api/v1";
+    return toAbsoluteApiBase(fallbackPath);
+  }
 
   if (configured.startsWith("http://") || configured.startsWith("https://")) {
     return configured.replace(/\/$/, "");
   }
 
-  if (typeof window !== "undefined") {
-    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    if (isLocalhost) {
-      const path = configured.startsWith("/") ? configured : "/api/v1";
-      return `http://localhost:4100${path}`.replace(/\/$/, "");
-    }
-  }
-
-  const fallbackPath = configured || "/api/v1";
-  return fallbackPath.replace(/\/$/, "");
+  return (configured || "/api/v1").replace(/\/$/, "");
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -933,6 +1075,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
       if (response.status === 204) {
         return undefined as T;
+      }
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        const invalidResponseError = createApiRequestError(
+          "API beklenmeyen yanit dondu. Ctrl+Shift+R ile sert yenileyip tekrar dene.",
+          { code: "INVALID_RESPONSE", status: response.status },
+        );
+        notifyApiFailure(invalidResponseError);
+        throw invalidResponseError;
       }
 
       return response.json() as Promise<T>;
@@ -1080,22 +1232,79 @@ export const apiClient = {
       },
     });
   },
-  branches(accessToken: string) {
-    return request("/branches", {
+  branches(accessToken: string, params?: Record<string, string | undefined | null>) {
+    return request<BranchRecord[]>(`/branches${buildQuery(params)}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
     });
   },
-  roles(accessToken: string) {
-    return request("/iam/roles", {
+  branchDetail(accessToken: string, id: string) {
+    return request<BranchRecord>(`/branches/${id}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  createBranch(accessToken: string, body: CreateBranchPayload) {
+    return request<BranchRecord>("/branches", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  updateBranch(accessToken: string, id: string, body: UpdateBranchPayload) {
+    return request<BranchRecord>(`/branches/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  companies(accessToken: string) {
+    return request<CompanyRecord[]>("/companies", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  companyDetail(accessToken: string, id: string) {
+    return request<CompanyRecord>(`/companies/${id}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  createCompany(accessToken: string, body: CreateCompanyPayload) {
+    return request<CompanyRecord>("/companies", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  updateCompany(accessToken: string, id: string, body: UpdateCompanyPayload) {
+    return request<CompanyRecord>(`/companies/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  },
+  roles(accessToken: string, params?: Record<string, string | undefined | null>) {
+    return request<IamRoleRecord[]>(`/iam/roles${buildQuery(params)}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
     });
   },
   permissions(accessToken: string) {
-    return request("/iam/permissions", {
+    return request<IamPermissionRecord[]>("/iam/permissions", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -1899,6 +2108,38 @@ export const apiClient = {
   },
   auditLogs(accessToken: string, params?: Record<string, string | number | boolean | undefined | null>) {
     return request<AuditLogsResponse>(`/audit/logs${buildQuery(params)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+  printIntegrations(accessToken: string, branchId: string) {
+    return request<Record<string, unknown>>(`/admin/print-integrations?branchId=${encodeURIComponent(branchId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+  bootstrapPrintIntegrations(accessToken: string, branchId: string) {
+    return request<Record<string, unknown>>(`/admin/print-integrations/bootstrap?branchId=${encodeURIComponent(branchId)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+  saveCategoryPrintRouting(accessToken: string, categoryId: string, destinationIds: string[]) {
+    return request<Record<string, unknown>>(`/admin/print-integrations/categories/${categoryId}/routing`, {
+      method: "PUT",
+      body: JSON.stringify({ destinationIds }),
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+  testPrinterConnection(accessToken: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/pos/printers/test-connection", {
+      method: "POST",
+      body: JSON.stringify(data),
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  },
+  testPrinterDispatch(accessToken: string, printerId: string) {
+    return request<Record<string, unknown>>("/pos/printers/test", {
+      method: "POST",
+      body: JSON.stringify({ printerId, documentType: "receipt" }),
       headers: { Authorization: `Bearer ${accessToken}` },
     });
   },

@@ -104,6 +104,9 @@ function createService() {
         items: [],
       })),
     },
+    ticketDiscount: {
+      findMany: vi.fn(async () => []),
+    },
   };
 
   const auditLogService = {
@@ -215,6 +218,55 @@ describe("PosService", () => {
         garsonActor,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde indirim islemini backend seviyesinde engeller", async () => {
+    const { service } = createService();
+    await expect(
+      service.applyDiscount(
+        "ticket-1",
+        { discountType: "fixed", label: "Test", amount: 10, reason: "Test indirimi" },
+        waiterActor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde adisyon bolme islemini backend seviyesinde engeller", async () => {
+    const { service } = createService();
+    await expect(
+      service.splitTicket(
+        "ticket-1",
+        { items: [{ itemId: "item-1", quantity: 1 }] },
+        waiterActor,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde masa tasima islemini backend seviyesinde engeller", async () => {
+    const { service } = createService();
+    await expect(
+      service.transferTicket("ticket-1", { tableId: "table-2" }, waiterActor),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde adisyon birlestirme islemini backend seviyesinde engeller", async () => {
+    const { service } = createService();
+    await expect(
+      service.mergeTickets({ sourceTicketId: "ticket-1", targetTicketId: "ticket-2" }, waiterActor, "ticket-2"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde adisyon iptal islemini backend seviyesinde engeller", async () => {
+    const { service } = createService();
+    await expect(service.voidTicket("ticket-1", { reason: "Musteri vazgecti" }, waiterActor)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("waiter rolunde kasa acilis islemini backend seviyesinde engeller", async () => {
+    const { service, posRegisterService } = createService();
+    await expect(
+      service.openRegister({ branchId: "branch-1", openingCash: 100 }, waiterActor),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(posRegisterService.ensureActiveRegisterSession).not.toHaveBeenCalled();
   });
 
   it("payment flow tam odemede ticket, register ve stock zincirini tamamlar", async () => {

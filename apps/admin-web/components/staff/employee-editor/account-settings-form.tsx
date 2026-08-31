@@ -1,6 +1,6 @@
 "use client";
 
-import { AdminFilterPanel } from "../../ui/admin-ui";
+import { AdminButton, AdminFilterPanel } from "../../ui/admin-ui";
 import { EmployeeSelectField, EmployeeTextField, EmployeeToggleField } from "./employee-editor-fields";
 import type { EmployeeAccountSettingsFormData, EmployeeEditorMeta } from "./types";
 
@@ -24,9 +24,9 @@ export function AccountSettingsForm({
       title="Hesap Ayarlari"
       description="Hesap, rol ve operasyonel personel ayarlarini bu alandan yonet."
       actions={
-        <button type="button" className="admin-primary-button" onClick={onSubmit} disabled={saving}>
+        <AdminButton variant="primary" onClick={onSubmit} disabled={saving} loading={saving}>
           {saving ? "Kaydediliyor..." : "Kaydet"}
-        </button>
+        </AdminButton>
       }
     >
       <div className="admin-form-grid">

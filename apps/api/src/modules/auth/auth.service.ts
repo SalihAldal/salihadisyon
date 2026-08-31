@@ -39,13 +39,15 @@ export class AuthService {
     const normalizedEmail = sanitizeTextInput(dto.email.toLowerCase());
     const deviceLabel = dto.deviceLabel ? sanitizeTextInput(dto.deviceLabel) : "web-admin";
     const clientIp = request?.ip ?? request?.headers["x-forwarded-for"]?.toString() ?? "unknown";
-    const ipBucket = this.securityRateLimitService.check(`auth:login:ip:${clientIp}`, 12, 15 * 60_000, 20 * 60_000);
-    if (!ipBucket.allowed) {
-      throw new AppTooManyRequestsException("Cok fazla giris denemesi yapildi. Bir sure bekleyip tekrar deneyin.");
-    }
-    const emailBucket = this.securityRateLimitService.check(`auth:login:email:${normalizedEmail}`, 6, 15 * 60_000, 30 * 60_000);
-    if (!emailBucket.allowed) {
-      throw new AppTooManyRequestsException("Bu hesap icin gecici giris kilidi aktif. Bir sure sonra tekrar deneyin.");
+    if (apiRuntimeConfig.authLoginRateLimitEnabled) {
+      const ipBucket = this.securityRateLimitService.check(`auth:login:ip:${clientIp}`, 12, 15 * 60_000, 20 * 60_000);
+      if (!ipBucket.allowed) {
+        throw new AppTooManyRequestsException("Cok fazla giris denemesi yapildi. Bir sure bekleyip tekrar deneyin.");
+      }
+      const emailBucket = this.securityRateLimitService.check(`auth:login:email:${normalizedEmail}`, 6, 15 * 60_000, 30 * 60_000);
+      if (!emailBucket.allowed) {
+        throw new AppTooManyRequestsException("Bu hesap icin gecici giris kilidi aktif. Bir sure sonra tekrar deneyin.");
+      }
     }
 
     const user = await this.prisma.user.findUnique({
@@ -120,6 +122,9 @@ export class AuthService {
       throw new UnauthorizedException("Gecersiz giris bilgileri.");
     }
     this.securityRateLimitService.reset(`auth:login:email:${normalizedEmail}`);
+    if (apiRuntimeConfig.authLoginRateLimitEnabled) {
+      this.securityRateLimitService.reset(`auth:login:ip:${clientIp}`);
+    }
 
 
     const roleContext = this.resolveRoleContext(user, activeEmployeeProfile ?? undefined);
@@ -231,9 +236,11 @@ export class AuthService {
     }
     const deviceLabel = dto.deviceLabel ? sanitizeTextInput(dto.deviceLabel) : "pos-web";
     const clientIp = request?.ip ?? request?.headers["x-forwarded-for"]?.toString() ?? "unknown";
-    const pinBucket = this.securityRateLimitService.check(`auth:login:pin:${normalizedPinCode}:${clientIp}`, 8, 10 * 60_000, 15 * 60_000);
-    if (!pinBucket.allowed) {
-      throw new AppTooManyRequestsException("Cok fazla pin denemesi yapildi. Bir sure bekleyip tekrar deneyin.");
+    if (apiRuntimeConfig.authLoginRateLimitEnabled) {
+      const pinBucket = this.securityRateLimitService.check(`auth:login:pin:${normalizedPinCode}:${clientIp}`, 8, 10 * 60_000, 15 * 60_000);
+      if (!pinBucket.allowed) {
+        throw new AppTooManyRequestsException("Cok fazla pin denemesi yapildi. Bir sure bekleyip tekrar deneyin.");
+      }
     }
 
     const employee = await this.prisma.employeeProfile.findFirst({
@@ -354,6 +361,10 @@ export class AuthService {
       deviceInfo: deviceLabel,
     });
 
+    if (apiRuntimeConfig.authLoginRateLimitEnabled) {
+      this.securityRateLimitService.reset(`auth:login:pin:${normalizedPinCode}:${clientIp}`);
+    }
+
     return {
       accessToken,
       refreshToken,
@@ -373,9 +384,11 @@ export class AuthService {
   async refresh(dto: RefreshTokenDto) {
     const sanitizedRefreshToken = sanitizeTextInput(dto.refreshToken);
     const refreshHashSeed = sanitizedRefreshToken.slice(-32);
-    const refreshBucket = this.securityRateLimitService.check(`auth:refresh:${refreshHashSeed}`, 20, 10 * 60_000, 10 * 60_000);
-    if (!refreshBucket.allowed) {
-      throw new AppTooManyRequestsException("Cok fazla refresh istegi yapildi. Bir sure sonra tekrar deneyin.");
+    if (apiRuntimeConfig.authLoginRateLimitEnabled) {
+      const refreshBucket = this.securityRateLimitService.check(`auth:refresh:${refreshHashSeed}`, 20, 10 * 60_000, 10 * 60_000);
+      if (!refreshBucket.allowed) {
+        throw new AppTooManyRequestsException("Cok fazla refresh istegi yapildi. Bir sure sonra tekrar deneyin.");
+      }
     }
 
     let payload: { sub: string; tenantId: string };

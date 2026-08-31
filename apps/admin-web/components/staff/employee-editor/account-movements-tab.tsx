@@ -1,6 +1,6 @@
 "use client";
 
-import { AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../../ui/admin-ui";
+import { AdminInput, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../../ui/admin-ui";
 import { formatTrDateTimeSafe, formatTryCurrencySafe } from "../../../lib/utils/admin-format";
 
 export function AccountMovementsTab({
@@ -30,17 +30,17 @@ export function AccountMovementsTab({
         description="Finansal ve statusel tum personel hareketlerini tek timeline mantiginda izle."
         actions={
           <div className="admin-button-row">
-            <input
+            <AdminInput
               value={filters.search}
               onChange={(event) => onFilterChange({ ...filters, search: event.target.value })}
               placeholder="Aciklama / referans / kisi ara"
               className="admin-employee-editor__filter-input"
             />
-            <select value={filters.sourceType} onChange={(event) => onFilterChange({ ...filters, sourceType: event.target.value })}>
+            <AdminSelect value={filters.sourceType} onChange={(event) => onFilterChange({ ...filters, sourceType: event.target.value })}>
               <option value="all">Tum Kaynaklar</option>
               <option value="financial">Finansal</option>
               <option value="status">Durum Loglari</option>
-            </select>
+            </AdminSelect>
           </div>
         }
       >

@@ -406,7 +406,15 @@ export class PosRegisterService {
     userId: string,
     terminalId?: string | null,
   ) {
-    const closing = await this.findActiveClosing(tx, branchId, userId, terminalId);
+    if (terminalId) {
+      const closing = await this.findActiveClosing(tx, branchId, userId, terminalId);
+      if (!closing) {
+        throw new NotFoundException("Kapatilacak aktif kasa session bulunamadi.");
+      }
+      return closing;
+    }
+
+    const closing = await this.resolveActiveRegisterWithoutTerminal(tx, branchId, userId);
     if (!closing) {
       throw new NotFoundException("Kapatilacak aktif kasa session bulunamadi.");
     }
@@ -415,12 +423,73 @@ export class PosRegisterService {
 
   async ensureActiveRegisterSession(branchId: string, actor: PosActor, terminalId?: string | null) {
     const resolvedBranchId = this.resolveBranchId(actor, branchId);
-    const resolvedTerminalId = await this.resolveTerminalId(resolvedBranchId, terminalId ?? actor.terminalId ?? null);
-    const closing = await this.findActiveClosing(this.prisma, resolvedBranchId, actor.userId, resolvedTerminalId);
+    const requestedTerminalId = terminalId ?? actor.terminalId ?? null;
+
+    if (requestedTerminalId) {
+      const resolvedTerminalId = await this.resolveTerminalId(resolvedBranchId, requestedTerminalId);
+      const closing = await this.findActiveClosing(this.prisma, resolvedBranchId, actor.userId, resolvedTerminalId);
+      if (!closing) {
+        throw new BadRequestException("Kapali kasada islem yapilamaz. Once kasa acilisi yapin.");
+      }
+      return closing;
+    }
+
+    const closing = await this.resolveActiveRegisterWithoutTerminal(this.prisma, resolvedBranchId, actor.userId);
     if (!closing) {
       throw new BadRequestException("Kapali kasada islem yapilamaz. Once kasa acilisi yapin.");
     }
     return closing;
+  }
+
+  private async resolveActiveRegisterWithoutTerminal(
+    tx: Prisma.TransactionClient,
+    branchId: string,
+    userId: string,
+  ) {
+    const userScoped = await tx.registerClosing.findFirst({
+      where: {
+        branchId,
+        userId,
+        terminalId: null,
+        isOpen: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (userScoped) {
+      return userScoped;
+    }
+
+    const userTerminalSessions = await tx.registerClosing.findMany({
+      where: {
+        branchId,
+        userId,
+        terminalId: { not: null },
+        isOpen: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (userTerminalSessions.length === 1) {
+      return userTerminalSessions[0];
+    }
+    if (userTerminalSessions.length > 1) {
+      throw new BadRequestException("Birden fazla acik kasa session bulundu. Terminal secimi gerekli.");
+    }
+
+    const branchSessions = await tx.registerClosing.findMany({
+      where: {
+        branchId,
+        isOpen: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (branchSessions.length === 1) {
+      return branchSessions[0];
+    }
+    if (branchSessions.length > 1) {
+      throw new BadRequestException("Terminal secimi gerekli. Aktif kasa icin terminalId gonderin.");
+    }
+
+    return null;
   }
 
   private async findActiveClosing(

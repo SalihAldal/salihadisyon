@@ -2,6 +2,7 @@
 
 import type { ChangeEvent, ReactNode } from "react";
 import type { EmployeeSelectOption } from "./types";
+import { AdminField, AdminInput, AdminSelect, AdminTextarea } from "../../ui/admin-ui";
 
 function FieldShell({
   label,
@@ -15,11 +16,9 @@ function FieldShell({
   children: ReactNode;
 }) {
   return (
-    <label className={`admin-field ${fullWidth ? "admin-field--full" : ""}`}>
-      <span>{label}</span>
+    <AdminField label={label} helper={helper} fullWidth={fullWidth}>
       {children}
-      {helper ? <small className="admin-field__helper">{helper}</small> : null}
-    </label>
+    </AdminField>
   );
 }
 
@@ -44,7 +43,7 @@ export function EmployeeTextField({
 }) {
   return (
     <FieldShell label={label} helper={helper} fullWidth={fullWidth}>
-      <input type={type} value={value} placeholder={placeholder} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      <AdminInput type={type} value={value} placeholder={placeholder} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
     </FieldShell>
   );
 }
@@ -66,7 +65,7 @@ export function EmployeeTextareaField({
 }) {
   return (
     <FieldShell label={label} helper={helper} fullWidth={fullWidth}>
-      <textarea value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <AdminTextarea value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </FieldShell>
   );
 }
@@ -90,14 +89,14 @@ export function EmployeeSelectField({
 }) {
   return (
     <FieldShell label={label} helper={helper}>
-      <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+      <AdminSelect value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
         <option value="">{placeholder}</option>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
-      </select>
+      </AdminSelect>
     </FieldShell>
   );
 }
@@ -115,10 +114,10 @@ export function EmployeeToggleField({
 }) {
   return (
     <FieldShell label={label} helper={helper}>
-      <select value={checked ? "true" : "false"} onChange={(event) => onChange(event.target.value === "true")}>
+      <AdminSelect value={checked ? "true" : "false"} onChange={(event) => onChange(event.target.value === "true")}>
         <option value="true">Aktif</option>
         <option value="false">Pasif</option>
-      </select>
+      </AdminSelect>
     </FieldShell>
   );
 }

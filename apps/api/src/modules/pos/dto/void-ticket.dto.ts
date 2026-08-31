@@ -1,7 +1,7 @@
-import { IsOptional, IsString } from "class-validator";
+import { IsString, MinLength } from "class-validator";
 
 export class VoidTicketDto {
-  @IsOptional()
   @IsString()
-  reason?: string;
+  @MinLength(3)
+  reason!: string;
 }

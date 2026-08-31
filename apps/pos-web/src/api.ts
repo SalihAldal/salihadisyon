@@ -6,20 +6,67 @@ const browserOrigin =
     ? window.location.origin
     : "";
 
+function isAdisyonSubpathDeploy() {
+  return typeof window !== "undefined" && window.location.pathname.startsWith("/adisyon/pos");
+}
+
+function toAbsoluteApiBase(pathOrUrl: string) {
+  const trimmed = pathOrUrl.trim().replace(/\/$/, "");
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (!browserOrigin) {
+    return trimmed;
+  }
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return `${browserOrigin}${path}`;
+}
+
 function resolvePosApiBase() {
+  const injected = (globalThis as { __POS_API_BASE__?: string }).__POS_API_BASE__;
+  if (typeof injected === "string" && injected.length > 0) {
+    return toAbsoluteApiBase(injected);
+  }
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  if (env?.VITE_API_URL) {
+    return toAbsoluteApiBase(env.VITE_API_URL);
+  }
   const manual = (globalThis as any)?.__POS_API_BASE__;
   if (typeof manual === "string" && manual.length > 0) {
-    return manual;
+    return toAbsoluteApiBase(manual);
   }
 
   if (browserOrigin.includes("localhost:3001") || browserOrigin.includes("127.0.0.1:3001")) {
     return "http://localhost:4100/api/v1";
   }
 
+  if (isAdisyonSubpathDeploy()) {
+    return toAbsoluteApiBase("/adisyon/api/v1");
+  }
+
   return browserOrigin ? `${browserOrigin}/api/v1` : "/api/v1";
 }
 
+export function resolvePosSocketPath() {
+  const injected = (globalThis as { __POS_SOCKET_PATH__?: string }).__POS_SOCKET_PATH__;
+  if (typeof injected === "string" && injected.length > 0) {
+    return injected;
+  }
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  if (env?.VITE_SOCKET_PATH) {
+    return env.VITE_SOCKET_PATH;
+  }
+  if (isAdisyonSubpathDeploy()) {
+    return "/adisyon/ws/socket.io";
+  }
+  return "/socket.io";
+}
+
 function resolvePosSocketUrl() {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  if (env?.VITE_SOCKET_URL) {
+    return env.VITE_SOCKET_URL;
+  }
   const manual = (globalThis as any)?.__POS_SOCKET_URL__;
   if (typeof manual === "string" && manual.length > 0) {
     return manual;
@@ -29,10 +76,14 @@ function resolvePosSocketUrl() {
     return "http://localhost:4100/pos";
   }
 
-  return browserOrigin ? `${browserOrigin}/pos` : "/pos";
+  return "/pos";
 }
 
-export const POS_API_BASE = resolvePosApiBase();
+export function getPosApiBase() {
+  return resolvePosApiBase();
+}
+
+export const POS_API_BASE = getPosApiBase();
 export const POS_SOCKET_URL = resolvePosSocketUrl();
 const POS_SESSION_REFRESH_EVENT = "pos.session.refreshed";
 const POS_SESSION_INVALIDATED_EVENT = "pos.session.invalidated";
@@ -166,6 +217,24 @@ function createPosApiError(message: string, options?: Partial<PosApiError>) {
   return error;
 }
 
+function safeIdempotencyKey() {
+  const cryptoObj = (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
+  }
+  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoObj.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex
+      .slice(8, 10)
+      .join("")}-${hex.slice(10, 16).join("")}`;
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+}
+
 function notifyPosFailure(error: PosApiError) {
   emitPosToast({
     tone: error.isOffline ? "warning" : "danger",
@@ -179,7 +248,7 @@ function buildMutationHeaders(method: string, options?: PosRequestOptions) {
     return {} as Record<string, string>;
   }
   return {
-    "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+    "Idempotency-Key": options?.idempotencyKey ?? safeIdempotencyKey(),
     "X-Device-Label": "pos-web",
   };
 }
@@ -248,7 +317,7 @@ async function refreshSessionIfPossible() {
   }
   refreshInFlight = (async () => {
     try {
-      const response = await fetch(`${POS_API_BASE}/auth/refresh`, {
+      const response = await fetch(`${getPosApiBase()}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: current.refreshToken }),
@@ -298,7 +367,7 @@ async function request<T>(path: string, init?: RequestInit, accessToken?: string
     const { controller, timeoutId } = createTimeoutController();
     try {
       const method = (init?.method ?? "GET").toUpperCase();
-      const response = await fetch(`${POS_API_BASE}${path}`, {
+      const response = await fetch(`${getPosApiBase()}${path}`, {
         ...init,
         signal: controller.signal,
         headers: mergeHeaders(
@@ -312,7 +381,7 @@ async function request<T>(path: string, init?: RequestInit, accessToken?: string
       if (response.status === 401 && accessToken && path !== "/auth/login" && path !== "/auth/refresh") {
         const refreshed = await refreshSessionIfPossible();
         if (refreshed?.accessToken) {
-          const retriedResponse = await fetch(`${POS_API_BASE}${path}`, {
+          const retriedResponse = await fetch(`${getPosApiBase()}${path}`, {
             ...init,
             signal: controller.signal,
             headers: mergeHeaders(
@@ -390,7 +459,7 @@ async function requestText(path: string, init?: RequestInit, accessToken?: strin
   const { controller, timeoutId } = createTimeoutController();
   try {
     const method = (init?.method ?? "GET").toUpperCase();
-    const response = await fetch(`${POS_API_BASE}${path}`, {
+    const response = await fetch(`${getPosApiBase()}${path}`, {
       ...init,
       signal: controller.signal,
       headers: mergeHeaders(
@@ -403,7 +472,7 @@ async function requestText(path: string, init?: RequestInit, accessToken?: strin
     if (response.status === 401 && accessToken && path !== "/auth/login" && path !== "/auth/refresh") {
       const refreshed = await refreshSessionIfPossible();
       if (refreshed?.accessToken) {
-        const retriedResponse = await fetch(`${POS_API_BASE}${path}`, {
+        const retriedResponse = await fetch(`${getPosApiBase()}${path}`, {
           ...init,
           signal: controller.signal,
           headers: mergeHeaders(
@@ -519,6 +588,12 @@ export const posApi = {
   addNote(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/notes`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
+  requestBill(accessToken: string, ticketId: string) {
+    return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/bill-request`, { method: "POST", body: JSON.stringify({}) }, accessToken);
+  },
+  listTicketEvents(accessToken: string, ticketId: string) {
+    return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/events`, undefined, accessToken);
+  },
   applyDiscount(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/discounts`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
@@ -528,14 +603,26 @@ export const posApi = {
   splitTicket(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/split`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
+  splitTicketByPerson(accessToken: string, ticketId: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/split/by-person`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
   mergeTickets(accessToken: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${data.targetTicketId}/merge`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
   transferTicket(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/transfer`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
+  voidItem(accessToken: string, ticketId: string, itemId: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/items/${itemId}/void`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
   voidTicket(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/void`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
+  approveApproval(accessToken: string, approvalId: string, data: Record<string, unknown> = {}) {
+    return request<Record<string, unknown>>(`/pos/approvals/${approvalId}/approve`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
+  rejectApproval(accessToken: string, approvalId: string, data: Record<string, unknown> = {}) {
+    return request<Record<string, unknown>>(`/pos/approvals/${approvalId}/reject`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
   refund(accessToken: string, ticketId: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/refund`, { method: "POST", body: JSON.stringify(data) }, accessToken);
@@ -546,8 +633,17 @@ export const posApi = {
   print(accessToken: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/printers/dispatch`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
+  dispatchTicketPrintRouting(accessToken: string, ticketId: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/pos/tickets/${ticketId}/print-routing`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
+  acknowledgePrintJob(accessToken: string, jobId: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/pos/printers/jobs/${jobId}/ack`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
   testPrinter(accessToken: string, data: Record<string, unknown>) {
     return request<Record<string, unknown>>(`/pos/printers/test`, { method: "POST", body: JSON.stringify(data) }, accessToken);
+  },
+  testPrinterConnection(accessToken: string, data: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/pos/printers/test-connection`, { method: "POST", body: JSON.stringify(data) }, accessToken);
   },
   connectionStatus(accessToken: string, branchId: string, terminalId?: string) {
     const query = new URLSearchParams({ branchId });

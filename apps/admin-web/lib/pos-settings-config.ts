@@ -43,6 +43,7 @@ export const posSettingsScreens: PosSettingsScreenConfig[] = [
   { slug: "tanimli-cihazlar", resource: "defined-devices", title: "Tanimli Cihazlar", description: "POS cihaz envanteri" },
   { slug: "terminaller", resource: "terminals", title: "Terminaller", description: "Terminal CRUD" },
   { slug: "yazicilar", resource: "printers", title: "Yazicilar", description: "Fis ve mutfak yazicilari" },
+  { slug: "fis-entegrasyonlari", resource: "printers", title: "Fis Entegrasyonlari", description: "Fislik routing ve test baskisi" },
   { slug: "arka-ekran-slider", resource: "back-screen-slider", title: "Arka Ekran Slider", description: "Slide yonetimi" },
   { slug: "masa-renkleri", resource: "table-colors", title: "Masa Renkleri", description: "Durum renk kurallari" },
   { slug: "indirim-turleri", resource: "discount-types", title: "Indirim Turleri", description: "Indirim setleri" },

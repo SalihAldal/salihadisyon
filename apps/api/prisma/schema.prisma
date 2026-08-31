@@ -163,6 +163,7 @@ model Company {
   subscription      Subscription?
   auditLogs         AuditLog[]
   refreshSessions   RefreshTokenSession[]
+  printDestinations PrintDestination[]
 }
 
 model Branch {
@@ -226,6 +227,7 @@ model Branch {
   productRatings     ProductRating[]
   staffDiscounts     StaffDiscount[]
   supportTickets     SupportTicket[]
+  printDestinations  PrintDestination[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -251,6 +253,8 @@ model User {
   roles           UserRole[]
   employeeProfiles EmployeeProfile[]
   openedTickets   Ticket[]     @relation("OpenedTickets")
+  billRequestedTickets Ticket[] @relation("BillRequestedTickets")
+  addedTicketItems TicketItem[] @relation("AddedTicketItems")
   registerClosings RegisterClosing[]
   registerTransactions RegisterTransaction[]
   createdExpenses Expense[]   @relation("CreatedExpenses")
@@ -349,15 +353,74 @@ model Terminal {
 }
 
 model Printer {
-  id           String   @id @default(cuid())
-  branchId      String
-  name          String
-  type          String
-  connectionUri String
-  isKitchen     Boolean  @default(false)
-  branch        Branch   @relation(fields: [branchId], references: [id])
+  id                 String            @id @default(cuid())
+  branchId           String
+  displayName        String?
+  name               String
+  type               String
+  connectionUri      String            @default("bridge://local")
+  isKitchen          Boolean           @default(false)
+  printDestinationId String?
+  isActive           Boolean           @default(true)
+  branch             Branch            @relation(fields: [branchId], references: [id])
+  printDestination   PrintDestination? @relation(fields: [printDestinationId], references: [id])
 
   @@index([branchId])
+  @@index([branchId, printDestinationId])
+}
+
+model PrintDestination {
+  id              String   @id @default(cuid())
+  companyId       String
+  branchId        String
+  code            String
+  name            String
+  isCashRegister  Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company               Company                    @relation(fields: [companyId], references: [id])
+  branch                Branch                     @relation(fields: [branchId], references: [id])
+  categoryLinks         CategoryPrintDestination[]
+  productOverrideLinks  ProductPrintDestination[]
+  printers              Printer[]
+
+  @@unique([branchId, code])
+  @@index([companyId, branchId, isActive])
+}
+
+model CategoryPrintDestination {
+  id                 String           @id @default(cuid())
+  categoryId         String
+  printDestinationId String
+  category           MenuCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  printDestination   PrintDestination @relation(fields: [printDestinationId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, printDestinationId])
+  @@index([printDestinationId])
+}
+
+model ProductPrintRouting {
+  id                 String                    @id @default(cuid())
+  productId          String                    @unique
+  useCategoryRouting Boolean                 @default(true)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  product            MenuProduct               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  destinations       ProductPrintDestination[]
+}
+
+model ProductPrintDestination {
+  id                    String              @id @default(cuid())
+  productPrintRoutingId String
+  printDestinationId    String
+  productPrintRouting   ProductPrintRouting @relation(fields: [productPrintRoutingId], references: [id], onDelete: Cascade)
+  printDestination      PrintDestination    @relation(fields: [printDestinationId], references: [id], onDelete: Cascade)
+
+  @@unique([productPrintRoutingId, printDestinationId])
+  @@index([printDestinationId])
 }
 
 model PosDevice {
@@ -568,6 +631,7 @@ model MenuCategory {
   defaultVatRate VatRate?      @relation("CategoryDefaultVatRate", fields: [defaultVatRateId], references: [id])
   products      MenuProduct[]
   goals         Goal[]
+  printDestinations CategoryPrintDestination[]
 
   @@index([companyId, branchId])
 }
@@ -605,6 +669,7 @@ model MenuProduct {
   recipe             Recipe?
   ratings            ProductRating[]
   goals              Goal[]
+  printRouting       ProductPrintRouting?
 
   @@index([companyId, branchId, categoryId])
   @@index([stockItemId])
@@ -730,8 +795,15 @@ model Ticket {
   discountTotal       Decimal       @default(0) @db.Decimal(12, 2)
   taxTotal            Decimal       @default(0) @db.Decimal(12, 2)
   grandTotal          Decimal       @default(0) @db.Decimal(12, 2)
+  parentTicketId      String?
+  splitGroupId        String?
+  personLabel         String?
+  voidReason          String?
+  billRequestedAt     DateTime?
+  billRequestedByUserId String?
   branch              Branch        @relation(fields: [branchId], references: [id])
   createdByUser       User?         @relation("OpenedTickets", fields: [createdByUserId], references: [id])
+  billRequestedBy     User?         @relation("BillRequestedTickets", fields: [billRequestedByUserId], references: [id])
   customer            Customer?     @relation(fields: [customerId], references: [id])
   table               DiningTable?  @relation(fields: [tableId], references: [id])
   items               TicketItem[]
@@ -743,6 +815,9 @@ model Ticket {
   @@index([companyId, branchId, status])
   @@index([companyId, branchId, status, closedAt])
   @@index([branchId, createdByUserId, closedAt])
+  @@index([splitGroupId])
+  @@index([parentTicketId])
+  @@index([billRequestedAt])
 }
 
 model TicketItem {
@@ -757,11 +832,14 @@ model TicketItem {
   lineTotal     Decimal     @db.Decimal(10, 2)
   notes         String?
   modifiersJson Json?
+  addedByUserId String?
   ticket        Ticket      @relation(fields: [ticketId], references: [id])
   product       MenuProduct? @relation(fields: [productId], references: [id])
+  addedByUser   User?       @relation("AddedTicketItems", fields: [addedByUserId], references: [id])
 
   @@index([ticketId])
   @@index([productId])
+  @@index([addedByUserId])
 }
 
 model Payment {
@@ -1903,19 +1981,28 @@ model TicketNote {
 }
 
 model TicketDiscount {
-  id           String   @id @default(cuid())
-  companyId    String
-  branchId     String
-  ticketId     String
-  ticketItemId String?
-  discountType String
-  label        String
-  amount       Decimal  @db.Decimal(12, 2)
-  approvalRequired Boolean @default(false)
-  approvedByUserId String?
-  createdAt    DateTime @default(now())
+  id                String   @id @default(cuid())
+  companyId         String
+  branchId          String
+  ticketId          String
+  ticketItemId      String?
+  discountType      String
+  discountKind      String   @default("DISCOUNT")
+  label             String
+  amount            Decimal  @db.Decimal(12, 2)
+  originalAmount    Decimal? @db.Decimal(12, 2)
+  percentage        Decimal? @db.Decimal(8, 4)
+  reason            String?
+  approvalRequired  Boolean  @default(false)
+  approvalRequestId String?
+  status            String   @default("applied")
+  approvedByUserId  String?
+  createdByUserId   String?
+  createdAt         DateTime @default(now())
 
   @@index([companyId, branchId, ticketId])
+  @@index([status])
+  @@index([approvalRequestId])
 }
 
 model TicketSplit {
@@ -2002,19 +2089,23 @@ model TableSession {
 }
 
 model PrinterJob {
-  id            String   @id @default(cuid())
-  companyId     String
-  branchId      String
-  printerId     String?
-  ticketId      String?
-  jobType       String
-  payload       Json
-  status        String   @default("queued")
-  requestedByUserId String?
-  createdAt     DateTime @default(now())
-  completedAt   DateTime?
+  id                 String   @id @default(cuid())
+  companyId          String
+  branchId           String
+  printerId          String?
+  ticketId           String?
+  printDestinationId String?
+  destinationCode    String?
+  idempotencyKey     String?  @unique
+  jobType            String
+  payload            Json
+  status             String   @default("queued")
+  requestedByUserId  String?
+  createdAt          DateTime @default(now())
+  completedAt        DateTime?
 
   @@index([companyId, branchId, status, createdAt])
+  @@index([ticketId, destinationCode, jobType])
 }
 
 model DrawerEvent {
@@ -2072,4 +2163,15 @@ model SystemBackup {
   @@index([status, createdAt])
   @@index([trigger, createdAt])
   @@index([requestedByUserId, createdAt])
+}
+
+model ApiIdempotencyRecord {
+  id           String   @id @default(cuid())
+  scopeKey     String   @unique
+  status       String
+  responseJson Json?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([expiresAt])
 }

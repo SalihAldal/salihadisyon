@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "../../lib/api/client";
+import { AdminButton, AdminField, AdminInput, AdminStateCard } from "../../components/ui/admin-ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,43 +37,48 @@ export default function LoginPage() {
 
   return (
     <div className="admin-login-card">
-      <div className="admin-section-head">
-        <div>
-          <p className="admin-kicker">Auth</p>
-          <h3>Yonetici Girisi</h3>
+      <div className="admin-login-head">
+        <div className="admin-login-brand">
+          <div className="admin-brand__mark" aria-hidden="true">
+            AL
+          </div>
+          <div>
+            <p className="admin-kicker">ALDAL POS</p>
+            <h3>Yönetici Girişi</h3>
+            <p className="admin-subtle-text">Paneli yönetmek için hesabınla giriş yap.</p>
+          </div>
         </div>
-        <span className="admin-status-pill admin-status-pill--info">Aldal Pos</span>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16, marginTop: 20 }}>
-        <label className="admin-field">
-          <span>E-posta</span>
-          <input
+      <form onSubmit={handleSubmit} action="#" method="post" className="admin-login-form">
+        <AdminField label="E-posta">
+          <AdminInput
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="owner@aldal.local"
+            placeholder="ornek@isletme.com"
             required
           />
-        </label>
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Sifre</span>
-          <input
+        <AdminField label="Sifre">
+          <AdminInput
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Sifreni gir"
             required
           />
-        </label>
+        </AdminField>
 
-        <button className="admin-primary-button" type="submit" disabled={loading}>
-          {loading ? "Giris yapiliyor..." : "Giris Yap"}
-        </button>
+        <div className="admin-login-actions">
+          <AdminButton variant="primary" type="submit" disabled={loading} loading={loading}>
+            {loading ? "Giris yapiliyor..." : "Giris Yap"}
+          </AdminButton>
+        </div>
 
-        {result ? <div className="admin-status-pill admin-status-pill--success">{result}</div> : null}
-        {error ? <div className="admin-status-pill admin-status-pill--danger">{error}</div> : null}
+        {result ? <AdminStateCard tone="success" message={result} /> : null}
+        {error ? <AdminStateCard tone="danger" message={error} /> : null}
       </form>
     </div>
   );

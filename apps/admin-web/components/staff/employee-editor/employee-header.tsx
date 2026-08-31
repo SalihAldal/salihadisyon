@@ -1,6 +1,6 @@
 "use client";
 
-import { AdminStatusBadge } from "../../ui/admin-ui";
+import { AdminButton, AdminStatusBadge, AdminTabs } from "../../ui/admin-ui";
 import type { EmployeeDetailData, EmployeeEditorTab } from "./types";
 
 const TAB_ITEMS: Array<{ id: EmployeeEditorTab; label: string }> = [
@@ -51,18 +51,12 @@ export function EmployeeHeader({
       </div>
 
       <div className="admin-employee-editor__toolbar">
-        <div className="admin-employee-editor__tabs">
-          {TAB_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`admin-chip ${activeTab === item.id ? "admin-chip--active" : ""}`}
-              onClick={() => onTabChange(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <AdminTabs
+          className="admin-employee-editor__tabs"
+          items={TAB_ITEMS.map((item) => ({ key: item.id, label: item.label }))}
+          active={activeTab}
+          onChange={onTabChange}
+        />
 
         {showActions ? (
           <details className="admin-employee-editor__actions">
@@ -70,29 +64,28 @@ export function EmployeeHeader({
             <div className="admin-employee-editor__actions-menu">
               {canManageEmployee ? (
                 <>
-                  <button type="button" className="admin-ghost-button" onClick={() => onTabChange("account-settings")}>
+                  <AdminButton variant="ghost" onClick={() => onTabChange("account-settings")}>
                     Hesap Ayarlarina git
-                  </button>
-                  <button type="button" className="admin-ghost-button" onClick={() => onTabChange("personal-info")}>
+                  </AdminButton>
+                  <AdminButton variant="ghost" onClick={() => onTabChange("personal-info")}>
                     Kisisel Bilgilere git
-                  </button>
-                  <button type="button" className="admin-ghost-button" onClick={() => onTabChange("other-info")}>
+                  </AdminButton>
+                  <AdminButton variant="ghost" onClick={() => onTabChange("other-info")}>
                     Diger Bilgilere git
-                  </button>
-                  <button type="button" className="admin-ghost-button" onClick={onPassive} disabled={busy || !detail.main.isActive}>
+                  </AdminButton>
+                  <AdminButton variant="ghost" onClick={onPassive} disabled={busy || !detail.main.isActive}>
                     Personeli pasiflestir
-                  </button>
+                  </AdminButton>
                 </>
               ) : null}
               {canAssignOwner ? (
-                <button
-                  type="button"
-                  className="admin-ghost-button"
+                <AdminButton
+                  variant="ghost"
                   onClick={onAssignOwner}
                   disabled={busy || !detail.main.isActive || detail.main.isOwner}
                 >
                   Isletme sahibi olarak ata
-                </button>
+                </AdminButton>
               ) : null}
               {!detail.main.isActive ? <p className="admin-employee-editor__actions-note">Pasif personelde kritik aksiyonlar kisitlidir.</p> : null}
             </div>

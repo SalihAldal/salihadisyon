@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchAuditLogs } from "../../lib/services/audit-service";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { AdminButton, AdminField, AdminFilterPanel, AdminInput, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
 
 type WaiterLogRow = {
   id: string;
@@ -69,24 +69,23 @@ export function WaiterActivityScreen() {
   if (error) return <AdminStateCard message={error} tone="danger" />;
 
   return (
-    <div className="dashboard-stack">
+    <div className="admin-page-stack admin-pos-settings-page">
       <AdminPageHeader
         kicker="Personel / Garson Loglari"
         title="Garson Masa Urun Islem Gecmisi"
         description="Hangi garsonun hangi masaya hangi urunu ne zaman girdigini izleyin."
         actions={
-          <button className="admin-outline-button" type="button" onClick={() => void loadLogs()}>
+          <AdminButton variant="outline" onClick={() => void loadLogs()}>
             Yenile
-          </button>
+          </AdminButton>
         }
       />
 
       <AdminFilterPanel title="Log filtreleri">
         <div className="admin-form-grid">
-          <label className="admin-field admin-field--full">
-            <span>Arama</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Garson, masa, urun veya sube" />
-          </label>
+          <AdminField label="Arama" fullWidth>
+            <AdminInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Garson, masa, urun veya sube" />
+          </AdminField>
         </div>
       </AdminFilterPanel>
 

@@ -30,7 +30,8 @@ export function PosLoginScreen({ onSubmit, loading, error }: PosLoginScreenProps
         <div className="pos-login-kiosk__content">
           <section className="pos-pin-panel">
             <label className="pos-login-field">
-              <span>Pin kodunuzu giriniz</span>
+              <span>Personel PIN kodunuzu giriniz</span>
+              <small className="pos-login-hint">Her garsonun kendine ozel PIN kodu vardir (Admin &gt; Personel).</small>
               <input value={"*".repeat(pinCode.length)} readOnly placeholder="****" />
             </label>
             <div className="pos-pin-grid">

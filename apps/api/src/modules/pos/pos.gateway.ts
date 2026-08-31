@@ -112,7 +112,15 @@ export class PosGateway implements OnGatewayConnection {
       client.join(`branch:${branchId}`);
     }
     if (payload.terminalId && typeof payload.terminalId === "string") client.join(`terminal:${payload.terminalId}`);
-    if (payload.ticketId && typeof payload.ticketId === "string") client.join(`ticket:${payload.ticketId}`);
+    if (payload.ticketId && typeof payload.ticketId === "string") {
+      const ticket = await this.prisma.ticket.findUnique({
+        where: { id: payload.ticketId },
+        select: { branchId: true, companyId: true },
+      });
+      if (ticket && ticket.companyId === client.data.auth.tenantId && allowedBranchIds.has(ticket.branchId)) {
+        client.join(`ticket:${payload.ticketId}`);
+      }
+    }
     if (payload.userId && payload.userId === client.data.auth.userId) client.join(`user:${payload.userId}`);
     return { success: true };
   }

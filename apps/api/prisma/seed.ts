@@ -189,15 +189,34 @@ async function main() {
     update: {
       passwordHash: waiterPasswordHash,
       companyId: company.id,
-      defaultBranchId: branchB.id,
+      defaultBranchId: branchA.id,
     },
     create: {
       companyId: company.id,
-      defaultBranchId: branchB.id,
+      defaultBranchId: branchA.id,
       fullName: "Mert Servis",
       email: "waiter@aldal.local",
       phone: "+90 555 000 00 03",
       passwordHash: waiterPasswordHash,
+      isActive: true,
+    },
+  });
+
+  const superAdminPasswordHash = await hash("SuperAdmin123!", 10);
+  const superAdmin = await prisma.user.upsert({
+    where: { email: "superadmin@aldal.local" },
+    update: {
+      passwordHash: superAdminPasswordHash,
+      companyId: company.id,
+      defaultBranchId: branchA.id,
+    },
+    create: {
+      companyId: company.id,
+      defaultBranchId: branchA.id,
+      fullName: "Platform Super Admin",
+      email: "superadmin@aldal.local",
+      phone: "+90 555 000 00 99",
+      passwordHash: superAdminPasswordHash,
       isActive: true,
     },
   });
@@ -214,11 +233,14 @@ async function main() {
   const waiterRole = await prisma.role.findUnique({
     where: { companyId_key: { companyId: company.id, key: "waiter" } },
   });
+  const superAdminRole = await prisma.role.findUnique({
+    where: { companyId_key: { companyId: company.id, key: "super_admin" } },
+  });
 
   await prisma.userRole.deleteMany({
     where: {
       userId: {
-        in: [owner.id, manager.id, cashier.id, waiter.id],
+        in: [owner.id, manager.id, cashier.id, waiter.id, superAdmin.id],
       },
     },
   });
@@ -228,6 +250,15 @@ async function main() {
       data: {
         userId: owner.id,
         roleId: tenantOwnerRole.id,
+      },
+    });
+  }
+
+  if (superAdminRole) {
+    await prisma.userRole.create({
+      data: {
+        userId: superAdmin.id,
+        roleId: superAdminRole.id,
       },
     });
   }
@@ -253,6 +284,13 @@ async function main() {
   }
 
   if (waiterRole) {
+    await prisma.userRole.create({
+      data: {
+        userId: waiter.id,
+        roleId: waiterRole.id,
+        branchId: branchA.id,
+      },
+    });
     await prisma.userRole.create({
       data: {
         userId: waiter.id,
@@ -1214,7 +1252,6 @@ async function main() {
       slug: "lotus-magnolia",
       description: "Lotus parcalari, diplomat krema, fransiz biscuit, antep fistigi",
     },
-    {
   ] as const;
 
   await prisma.menuProduct.deleteMany({
@@ -1729,24 +1766,174 @@ async function main() {
     },
   });
 
+  await prisma.printDestination.upsert({
+    where: { id: "dest_kasa" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "KASA",
+      name: "Kasa Fisi",
+      isCashRegister: true,
+      sortOrder: 1,
+      isActive: true,
+    },
+    create: {
+      id: "dest_kasa",
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "KASA",
+      name: "Kasa Fisi",
+      isCashRegister: true,
+      sortOrder: 1,
+      isActive: true,
+    },
+  });
+  await prisma.printDestination.upsert({
+    where: { id: "dest_bar" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "BAR",
+      name: "Bar Fisi",
+      isCashRegister: false,
+      sortOrder: 2,
+      isActive: true,
+    },
+    create: {
+      id: "dest_bar",
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "BAR",
+      name: "Bar Fisi",
+      isCashRegister: false,
+      sortOrder: 2,
+      isActive: true,
+    },
+  });
+  await prisma.printDestination.upsert({
+    where: { id: "dest_mutfak" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "MUTFAK",
+      name: "Mutfak Fisi",
+      isCashRegister: false,
+      sortOrder: 3,
+      isActive: true,
+    },
+    create: {
+      id: "dest_mutfak",
+      companyId: company.id,
+      branchId: branchA.id,
+      code: "MUTFAK",
+      name: "Mutfak Fisi",
+      isCashRegister: false,
+      sortOrder: 3,
+      isActive: true,
+    },
+  });
+
   await prisma.printer.upsert({
     where: { id: "printer_kitchen" },
     update: {
       branchId: branchA.id,
+      displayName: "Mutfak Fisi",
       name: "Mutfak Yazici",
-      type: "network",
-      connectionUri: "tcp://192.168.1.51:9100",
+      type: "production",
+      connectionUri: "bridge://local",
       isKitchen: true,
+      isActive: true,
+      printDestinationId: "dest_mutfak",
     },
     create: {
       id: "printer_kitchen",
       branchId: branchA.id,
+      displayName: "Mutfak Fisi",
       name: "Mutfak Yazici",
-      type: "network",
-      connectionUri: "tcp://192.168.1.51:9100",
+      type: "production",
+      connectionUri: "bridge://local",
       isKitchen: true,
+      isActive: true,
+      printDestinationId: "dest_mutfak",
     },
   });
+
+  await prisma.printer.upsert({
+    where: { id: "printer_bar" },
+    update: {
+      branchId: branchA.id,
+      displayName: "Bar Fisi",
+      name: "Bar Yazici",
+      type: "production",
+      connectionUri: "bridge://local",
+      isKitchen: false,
+      isActive: true,
+      printDestinationId: "dest_bar",
+    },
+    create: {
+      id: "printer_bar",
+      branchId: branchA.id,
+      displayName: "Bar Fisi",
+      name: "Bar Yazici",
+      type: "production",
+      connectionUri: "bridge://local",
+      isKitchen: false,
+      isActive: true,
+      printDestinationId: "dest_bar",
+    },
+  });
+
+  await prisma.printer.upsert({
+    where: { id: "printer_cash" },
+    update: {
+      branchId: branchA.id,
+      displayName: "Kasa Fisi",
+      name: "Kasa Yazici",
+      type: "receipt",
+      connectionUri: "bridge://local",
+      isKitchen: false,
+      isActive: true,
+      printDestinationId: "dest_kasa",
+    },
+    create: {
+      id: "printer_cash",
+      branchId: branchA.id,
+      displayName: "Kasa Fisi",
+      name: "Kasa Yazici",
+      type: "receipt",
+      connectionUri: "bridge://local",
+      isKitchen: false,
+      isActive: true,
+      printDestinationId: "dest_kasa",
+    },
+  });
+
+  const categoryDestinationLinks = [
+    { categoryId: coldDrinksCategory.id, destinationId: "dest_bar" },
+    { categoryId: coldDrinksCategory.id, destinationId: "dest_kasa" },
+    { categoryId: hotDrinksCategory.id, destinationId: "dest_bar" },
+    { categoryId: hotDrinksCategory.id, destinationId: "dest_kasa" },
+    { categoryId: chickenPastaCategory.id, destinationId: "dest_mutfak" },
+    { categoryId: chickenPastaCategory.id, destinationId: "dest_kasa" },
+    { categoryId: breakfastCategory.id, destinationId: "dest_mutfak" },
+    { categoryId: breakfastCategory.id, destinationId: "dest_kasa" },
+    { categoryId: dessertsCategory.id, destinationId: "dest_mutfak" },
+    { categoryId: dessertsCategory.id, destinationId: "dest_kasa" },
+  ];
+  for (const link of categoryDestinationLinks) {
+    await prisma.categoryPrintDestination.upsert({
+      where: { id: `cpd_${link.categoryId}_${link.destinationId}` },
+      update: {
+        categoryId: link.categoryId,
+        printDestinationId: link.destinationId,
+      },
+      create: {
+        id: `cpd_${link.categoryId}_${link.destinationId}`,
+        categoryId: link.categoryId,
+        printDestinationId: link.destinationId,
+      },
+    });
+  }
 
   await prisma.qrMenuSetting.upsert({
     where: { branchId: branchA.id },
@@ -3597,10 +3784,161 @@ async function main() {
     },
   });
 
+  // QA Tenant B — cross-tenant isolation runtime tests
+  const companyTenantB = await prisma.company.upsert({
+    where: { id: "cmp_qa_tenant_b" },
+    update: {},
+    create: {
+      id: "cmp_qa_tenant_b",
+      name: "QA Tenant B Corp",
+      legalName: "QA Tenant B A.S.",
+      taxNumber: "9876543210",
+      timezone: "Europe/Istanbul",
+      currency: "TRY",
+    },
+  });
+
+  const branchTenantB = await prisma.branch.upsert({
+    where: { companyId_code: { companyId: companyTenantB.id, code: "QA-B01" } },
+    update: {},
+    create: {
+      companyId: companyTenantB.id,
+      name: "QA Tenant B Merkez",
+      code: "QA-B01",
+      city: "Ankara",
+      district: "Cankaya",
+      addressLine: "QA Isolation Branch",
+      phone: "+90 312 000 00 01",
+      isActive: true,
+    },
+  });
+
+  for (const [key] of roleEntries) {
+    const role = await prisma.role.upsert({
+      where: { companyId_key: { companyId: companyTenantB.id, key } },
+      update: { name: key },
+      create: {
+        companyId: companyTenantB.id,
+        key,
+        name: key,
+        description: `${key} QA tenant B`,
+        isSystem: true,
+      },
+    });
+    await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+    const permissionKeys = [...new Set(roleMatrix[key as keyof typeof roleMatrix] ?? [])];
+    for (const permissionKey of permissionKeys) {
+      const permission = await prisma.permission.findUnique({ where: { key: permissionKey } });
+      if (!permission) continue;
+      await prisma.rolePermission.create({
+        data: { roleId: role.id, permissionId: permission.id },
+      });
+    }
+  }
+
+  await prisma.subscription.upsert({
+    where: { companyId: companyTenantB.id },
+    update: {
+      planId: starterPlan.id,
+      status: "ACTIVE",
+      startsAt: addDays(today, -1, 0, 0),
+      endsAt: addDays(today, 30, 23, 59),
+    },
+    create: {
+      companyId: companyTenantB.id,
+      planId: starterPlan.id,
+      status: "ACTIVE",
+      startsAt: addDays(today, -1, 0, 0),
+      endsAt: addDays(today, 30, 23, 59),
+    },
+  });
+
+  const tenantBOwnerHash = await hash("TenantB123!", 10);
+  const tenantBOwner = await prisma.user.upsert({
+    where: { email: "owner@tenantb.local" },
+    update: {
+      passwordHash: tenantBOwnerHash,
+      companyId: companyTenantB.id,
+      defaultBranchId: branchTenantB.id,
+    },
+    create: {
+      companyId: companyTenantB.id,
+      defaultBranchId: branchTenantB.id,
+      fullName: "QA Tenant B Owner",
+      email: "owner@tenantb.local",
+      phone: "+90 555 000 99 00",
+      passwordHash: tenantBOwnerHash,
+      isActive: true,
+    },
+  });
+
+  const tenantBOwnerRole = await prisma.role.findUnique({
+    where: { companyId_key: { companyId: companyTenantB.id, key: "tenant_owner" } },
+  });
+  if (tenantBOwnerRole) {
+    await prisma.userRole.deleteMany({ where: { userId: tenantBOwner.id } });
+    await prisma.userRole.create({
+      data: {
+        userId: tenantBOwner.id,
+        roleId: tenantBOwnerRole.id,
+        branchId: branchTenantB.id,
+      },
+    });
+  }
+
+  await prisma.diningTable.upsert({
+    where: { id: "table_tenant_b_1" },
+    update: { branchId: branchTenantB.id, name: "QA Masa 1", code: "QA-1", status: "AVAILABLE" },
+    create: {
+      id: "table_tenant_b_1",
+      branchId: branchTenantB.id,
+      name: "QA Masa 1",
+      code: "QA-1",
+      capacity: 4,
+      status: "AVAILABLE",
+    },
+  });
+
+  await prisma.ticket.upsert({
+    where: { id: "ticket_tenant_b_1" },
+    update: {
+      companyId: companyTenantB.id,
+      branchId: branchTenantB.id,
+      status: "PAID",
+      channel: "TABLE",
+      coverCount: 2,
+      grandTotal: 500,
+      subtotal: 500,
+      discountTotal: 0,
+      taxTotal: 0,
+    },
+    create: {
+      id: "ticket_tenant_b_1",
+      companyId: companyTenantB.id,
+      branchId: branchTenantB.id,
+      tableId: "table_tenant_b_1",
+      channel: "TABLE",
+      status: "PAID",
+      coverCount: 2,
+      subtotal: 500,
+      discountTotal: 0,
+      taxTotal: 0,
+      grandTotal: 500,
+      openedAt: addDays(today, -1, 12, 0),
+      closedAt: addDays(today, -1, 13, 0),
+    },
+  });
+
   console.log("Seed tamamlandi:", {
     company: company.name,
     branches: [branchA.name, branchB.name],
-    users: [owner.email, manager.email, cashier.email, waiter.email],
+    users: [owner.email, manager.email, cashier.email, waiter.email, superAdmin.email],
+    superAdmin: { email: superAdmin.email, password: "SuperAdmin123!" },
+    qaTenantB: {
+      company: companyTenantB.name,
+      owner: tenantBOwner.email,
+      ticket: "ticket_tenant_b_1",
+    },
   });
 }
 

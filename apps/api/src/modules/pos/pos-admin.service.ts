@@ -23,6 +23,7 @@ export class PosAdminService {
       customers,
       terminals,
       printers,
+      printDestinations,
       activeSettings,
     ] = await Promise.all([
       this.prisma.menuCategory.findMany({
@@ -62,7 +63,8 @@ export class PosAdminService {
         take: 50,
       }),
       this.prisma.terminal.findMany({ where: { branchId }, orderBy: { name: "asc" } }),
-      this.prisma.printer.findMany({ where: { branchId }, orderBy: { name: "asc" } }),
+      this.prisma.printer.findMany({ where: { branchId }, include: { printDestination: true }, orderBy: { name: "asc" } }),
+      this.prisma.printDestination.findMany({ where: { branchId, companyId: actor.tenantId, isActive: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
       this.prisma.posSetting.findMany({
         where: { companyId: actor.tenantId, isActive: true, OR: [{ branchId: null }, { branchId }] },
         orderBy: [{ branchId: "desc" }, { updatedAt: "desc" }],
@@ -120,10 +122,14 @@ export class PosAdminService {
     const printerRows = printers.map((printer) => ({
       id: printer.id,
       branchId: printer.branchId,
+      displayName: printer.displayName,
       name: printer.name,
       type: printer.type,
       connectionUri: printer.connectionUri,
       isKitchen: printer.isKitchen,
+      isActive: printer.isActive,
+      printDestinationId: printer.printDestinationId,
+      printDestinationCode: printer.printDestination?.code ?? null,
       isDefault: printer.id === defaultPrinterId || printer.id === defaultReceiptPrinterId,
       isDefaultKitchen: printer.id === defaultKitchenPrinterId,
       isDefaultLabel: printer.id === defaultLabelPrinterId,
@@ -177,6 +183,13 @@ export class PosAdminService {
 
     return {
       branchId,
+      printDestinations: printDestinations.map((destination) => ({
+        id: destination.id,
+        code: destination.code,
+        name: destination.name,
+        isCashRegister: destination.isCashRegister,
+        sortOrder: destination.sortOrder,
+      })),
       categories: categories.map((category) => ({
         id: category.id,
         name: category.name,

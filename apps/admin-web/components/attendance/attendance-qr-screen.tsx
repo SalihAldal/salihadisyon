@@ -11,7 +11,7 @@ import {
   issueEmployeeQr,
   scanQr,
 } from "../../lib/services/attendance-service";
-import { AdminStatusBadge, resolveBadgeTone } from "../ui/admin-ui";
+import { AdminButton, AdminField, AdminInput, AdminPageHeader, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, resolveBadgeTone } from "../ui/admin-ui";
 
 export function AttendanceQrScreen() {
   const [branchId, setBranchId] = useState("");
@@ -94,87 +94,69 @@ export function AttendanceQrScreen() {
   }
 
   if (loading) {
-    return <div className="admin-surface admin-empty-state">Mesai QR ekrani yukleniyor...</div>;
+    return <AdminStateCard tone="info" message="Mesai QR ekrani yukleniyor..." />;
   }
 
   return (
-    <div className="dashboard-stack">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Sprint 4 / Mesai QR</p>
-          <h3>QR guvenligi, mesai-mola akisi ve onay yonetimi</h3>
-        </div>
-      </section>
+    <div className="admin-page-stack admin-pos-settings-page">
+      <AdminPageHeader
+        kicker="Personel"
+        title="Mesai QR"
+        description="QR guvenligi, mesai-mola akisi ve onay yonetimi."
+      />
 
-      {error ? <div className="admin-status-pill admin-status-pill--danger">{error}</div> : null}
+      {error ? <AdminStateCard tone="danger" message={error} /> : null}
 
-      <section className="dashboard-grid dashboard-grid--stats">
+      <AdminStatsGrid>
         {(overview?.cards ?? []).map((card) => (
-          <article key={card.key} className="admin-surface admin-stat-card">
-            <div className="admin-stat-card__header">
-              <span className="admin-kicker">{card.label}</span>
-            </div>
-            <strong className="admin-stat-card__value">{card.value}</strong>
-          </article>
+          <AdminStatCard key={card.key} label={card.label} value={card.value} />
         ))}
-      </section>
+      </AdminStatsGrid>
 
       <section className="admin-detail-grid">
-        <article className="admin-surface">
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">QR Token</p>
-              <h3>Guvenli token uret ve okut</h3>
-            </div>
-          </div>
+        <AdminTableCard kicker="QR" title="Token üret & okut" description="Ekran tokeni ile personel QR tokenini eşleştirip okutun.">
           <div className="admin-form-grid">
-            <label className="admin-field">
-              <span>Sube ID</span>
-              <input value={branchId} onChange={(event) => setBranchId(event.target.value)} placeholder="cm..." />
-            </label>
-            <label className="admin-field">
-              <span>Aksiyon</span>
-              <select value={action} onChange={(event) => setAction(event.target.value)}>
+            <AdminField label="Şube ID">
+              <AdminInput value={branchId} onChange={(event) => setBranchId(event.target.value)} placeholder="cm..." />
+            </AdminField>
+            <AdminField label="Aksiyon">
+              <AdminSelect value={action} onChange={(event) => setAction(event.target.value)}>
                 <option value="SHIFT_IN">SHIFT_IN</option>
                 <option value="SHIFT_OUT">SHIFT_OUT</option>
                 <option value="BREAK_START">BREAK_START</option>
                 <option value="BREAK_END">BREAK_END</option>
-              </select>
-            </label>
-            <label className="admin-field">
-              <span>Token</span>
-              <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Olusan token" />
-            </label>
-            <label className="admin-field">
-              <span>Personel</span>
-              <select value={employeeProfileId} onChange={(event) => setEmployeeProfileId(event.target.value)}>
-                <option value="">Personel sec</option>
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Token">
+              <AdminInput value={token} onChange={(event) => setToken(event.target.value)} placeholder="Oluşan token" />
+            </AdminField>
+            <AdminField label="Personel">
+              <AdminSelect value={employeeProfileId} onChange={(event) => setEmployeeProfileId(event.target.value)}>
+                <option value="">Personel seç</option>
                 {(overview?.employees ?? []).map((item) => (
                   <option key={item.id} value={item.id}>{`${item.employeeName} / ${item.employeeCode}`}</option>
                 ))}
-              </select>
-            </label>
-            <label className="admin-field admin-field--full">
-              <span>Personel QR Token</span>
-              <input value={employeeQrToken} onChange={(event) => setEmployeeQrToken(event.target.value)} placeholder="Personel badge token" />
-            </label>
-            <label className="admin-field admin-field--full">
-              <span>Ekran QR Payload</span>
-              <input value={issuedQrPayload} onChange={(event) => setIssuedQrPayload(event.target.value)} placeholder="attendance://scan?token=..." />
-            </label>
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Personel QR Token" fullWidth>
+              <AdminInput value={employeeQrToken} onChange={(event) => setEmployeeQrToken(event.target.value)} placeholder="Personel badge token" />
+            </AdminField>
+            <AdminField label="Ekran QR Payload" fullWidth>
+              <AdminInput value={issuedQrPayload} onChange={(event) => setIssuedQrPayload(event.target.value)} placeholder="attendance://scan?token=..." />
+            </AdminField>
           </div>
           <div className="admin-filter-actions">
-            <button className="admin-outline-button" type="button" onClick={handleIssueEmployeeQr}>
+            <AdminButton variant="outline" onClick={handleIssueEmployeeQr}>
               Personel QR Uret
-            </button>
-            <button className="admin-outline-button" type="button" onClick={handleCreateToken}>
+            </AdminButton>
+            <AdminButton variant="outline" onClick={handleCreateToken}>
               Token Uret
-            </button>
-            <button className="admin-primary-button" type="button" onClick={handleScan}>
+            </AdminButton>
+            <AdminButton variant="primary" onClick={handleScan}>
               QR Okut
-            </button>
+            </AdminButton>
           </div>
-        </article>
+        </AdminTableCard>
 
         <article className="admin-surface">
           <div className="admin-section-head">
@@ -243,9 +225,9 @@ export function AttendanceQrScreen() {
               <li key={item.id}>
                 <strong>{item.employeeName}</strong>
                 <span>{` / gec ${item.lateMinutes} dk / fazla ${item.overtimeMinutes} dk`}</span>
-                <button className="admin-outline-button" type="button" onClick={() => handleApprove("shift", item.id, true)}>
+                <AdminButton variant="outline" onClick={() => handleApprove("shift", item.id, true)}>
                   Onayla
-                </button>
+                </AdminButton>
               </li>
             ))}
           </ul>
@@ -263,9 +245,9 @@ export function AttendanceQrScreen() {
               <li key={item.id}>
                 <strong>{item.employeeName}</strong>
                 <span>{` / ${item.totalMinutes} dk`}</span>
-                <button className="admin-outline-button" type="button" onClick={() => handleApprove("break", item.id, true)}>
+                <AdminButton variant="outline" onClick={() => handleApprove("break", item.id, true)}>
                   Onayla
-                </button>
+                </AdminButton>
               </li>
             ))}
           </ul>
@@ -283,9 +265,9 @@ export function AttendanceQrScreen() {
               <li key={item.id}>
                 <strong>{item.employeeName}</strong>
                 <span>{` / ${item.action}`}</span>
-                <button className="admin-outline-button" type="button" onClick={() => handleApprove("event", item.id, true)}>
+                <AdminButton variant="outline" onClick={() => handleApprove("event", item.id, true)}>
                   Onayla
-                </button>
+                </AdminButton>
               </li>
             ))}
           </ul>

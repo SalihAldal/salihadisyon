@@ -1,10 +1,11 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from "@nestjs/common";
-import { Observable, catchError, tap, throwError } from "rxjs";
+import { Observable, catchError, concatMap, defer, from, map, switchMap, throwError } from "rxjs";
+import { IdempotencyStoreService } from "../idempotency/idempotency-store.service";
 import type { AppRequest } from "../types/request-context";
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
-  private readonly cache = new Map<string, { status: "processing" | "completed"; response?: unknown }>();
+  constructor(private readonly idempotencyStore: IdempotencyStoreService) {}
 
   private buildScopedKey(request: AppRequest, key: string) {
     const tenantScope = request.user?.tenantId ?? request.scope?.tenantId ?? "public";
@@ -22,28 +23,37 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     const scopedKey = this.buildScopedKey(request, key);
-    const cached = this.cache.get(scopedKey);
-    if (cached?.status === "completed" && cached.response) {
+
+    return defer(() => from(this.handleScopedRequest(scopedKey, request, next))).pipe(switchMap((stream) => stream));
+  }
+
+  private async handleScopedRequest(
+    scopedKey: string,
+    request: AppRequest,
+    next: CallHandler,
+  ): Promise<Observable<unknown>> {
+    const acquired = await this.idempotencyStore.acquire(scopedKey);
+    if (acquired.kind === "replay") {
       request.auditTrail = {
         ...(request.auditTrail ?? { action: request.method, path: request.url, durationMs: 0 }),
         entityType: "idempotency-replay",
       };
       return new Observable((subscriber) => {
-        subscriber.next(cached.response);
+        subscriber.next(acquired.response);
         subscriber.complete();
       });
     }
-
-    this.cache.set(scopedKey, { status: "processing" });
+    if (acquired.kind === "processing") {
+      throw this.idempotencyStore.processingConflict();
+    }
 
     return next.handle().pipe(
-      tap((response) => {
-        this.cache.set(scopedKey, { status: "completed", response });
-      }),
-      catchError((error: unknown) => {
-        this.cache.delete(scopedKey);
-        return throwError(() => error);
-      }),
+      concatMap((response) =>
+        from(this.idempotencyStore.complete(scopedKey, response)).pipe(map(() => response)),
+      ),
+      catchError((error: unknown) =>
+        from(this.idempotencyStore.release(scopedKey)).pipe(switchMap(() => throwError(() => error))),
+      ),
     );
   }
 }

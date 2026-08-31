@@ -9,10 +9,11 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "kill:ports": "node ./scripts/kill-ports.mjs",
-    "kill:dev": "node ./scripts/kill-ports.mjs 3000 3001 4000",
+    "kill:dev": "node ./scripts/kill-ports.mjs 3000 3001 4100",
     "dev:admin": "pnpm --filter admin-web dev",
     "dev:api": "pnpm --filter api start:dev",
     "dev:pos": "pnpm --filter pos-web dev",
+    "dev:print-bridge": "pnpm --filter print-bridge dev",
     "dev:all": "turbo run dev --filter=api --filter=admin-web --filter=pos-web",
     "docker:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "docker:up:wait": "node ./scripts/docker-up-wait.mjs",
@@ -27,12 +28,24 @@
     "prisma:migrate": "pnpm --filter api prisma:migrate",
     "prisma:seed": "pnpm --filter api prisma:seed",
     "demo:seed": "pnpm --filter api prisma:demo:seed",
-    "demo:reset": "pnpm --filter api prisma:demo:reset"
+    "demo:reset": "pnpm --filter api prisma:demo:reset",
+    "qa:runtime": "node scripts/qa-runtime.mjs",
+    "qa:adisyon-11": "node scripts/qa-adisyon-11.mjs",
+    "qa:adisyon-12": "node scripts/qa-adisyon-12.mjs",
+    "qa:adisyon-13": "node scripts/qa-adisyon-13.mjs",
+    "qa:adisyon-14": "node scripts/qa-adisyon-14.mjs",
+    "qa:adisyon-final": "node scripts/qa-adisyon-final.mjs",
+    "qa:hardening": "node scripts/qa-hardening.mjs",
+    "qa:ui": "playwright test -c scripts/playwright.config.mjs",
+    "qa:v2": "node scripts/qa-runtime.mjs && playwright test -c scripts/playwright.config.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/node": "^24.0.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
+    "socket.io-client": "^4.8.1",
+    "ssh2": "^1.17.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
   }

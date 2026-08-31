@@ -21,7 +21,7 @@ import {
   updateEmployeeOtherInfo,
   updateEmployeePersonalInfo,
 } from "../../../lib/services/staff-service";
-import { AdminStateCard, AdminStatusBadge, AdminTableCard } from "../../ui/admin-ui";
+import { AdminButton, AdminField, AdminModal, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTextarea } from "../../ui/admin-ui";
 import { AccountMovementsTab } from "./account-movements-tab";
 import { AccountSettingsForm } from "./account-settings-form";
 import { EmployeeHeader } from "./employee-header";
@@ -875,18 +875,15 @@ export function EmployeeEditModal({
   }
 
   return (
-    <div className="admin-modal-backdrop" onClick={onClose}>
-      <section className="admin-modal-card admin-employee-editor-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="admin-section-head">
-          <div>
-            <p className="admin-kicker">Personel Duzenleme</p>
-            <h3>{detail?.main.fullName ?? "Personel bilgileri"}</h3>
-          </div>
-          <button className="admin-outline-button" type="button" onClick={onClose}>
-            Kapat
-          </button>
-        </div>
-
+    <>
+      <AdminModal
+        open
+        size="xl"
+        kicker="Personel Düzenleme"
+        title={detail?.main.fullName ?? "Personel bilgileri"}
+        onClose={onClose}
+        closeDisabled={actionBusy}
+      >
         {loading ? <AdminStateCard message="Personel ekrani yukleniyor..." tone="info" /> : null}
         {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
 
@@ -1014,34 +1011,41 @@ export function EmployeeEditModal({
             ) : null}
           </div>
         ) : null}
-      </section>
-      {actionModal ? (
-        <section className="admin-modal-card admin-employee-editor__confirm-modal" onClick={(event) => event.stopPropagation()}>
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">Guvenli Islem Onayi</p>
-              <h3>{actionModal === "passive" ? "Personeli pasiflestir" : "Isletme sahibi atamasi"}</h3>
+      </AdminModal>
+
+      <AdminModal
+        open={Boolean(actionModal)}
+        size="sm"
+        kicker="Güvenli İşlem Onayı"
+        title={actionModal === "passive" ? "Personeli pasifleştir" : "İşletme sahibi ataması"}
+        description={
+          actionModal
+            ? actionModal === "passive"
+              ? "Bu işlem personelin kritik akışlarını kilitler. Devam etmeden önce onay ver."
+              : "Bu işlem mevcut sahip kaydını değiştirir. Sadece yetkili kullanıcılar devam edebilir."
+            : undefined
+        }
+        onClose={() => closeActionModal()}
+        closeDisabled={actionBusy}
+        footer={
+          <div className="admin-modal__footer-content">
+            <div className="admin-modal__footer-left">
+              <AdminButton variant="text" onClick={() => closeActionModal()} disabled={actionBusy}>
+                Vazgeç
+              </AdminButton>
+            </div>
+            <div className="admin-modal__footer-right">
+              <AdminButton variant="primary" onClick={() => void handleConfirmAction()} disabled={actionBusy} loading={actionBusy}>
+                {actionBusy ? "İşleniyor..." : "Onayla"}
+              </AdminButton>
             </div>
           </div>
-          <p className="admin-subtle-text">
-            {actionModal === "passive"
-              ? "Bu islem personelin kritik akislarini kilitler. Devam etmeden once onay ver."
-              : "Bu islem mevcut sahip kaydini degistirir. Sadece yetkili kullanicilar devam edebilir."}
-          </p>
-          <label className="admin-field admin-field--full">
-            <span>Islem Notu</span>
-            <textarea rows={3} value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder="Audit log icin not ekleyebilirsin." />
-          </label>
-          <div className="admin-filter-actions">
-            <button className="admin-outline-button" type="button" onClick={() => closeActionModal()} disabled={actionBusy}>
-              Vazgec
-            </button>
-            <button className="admin-primary-button" type="button" onClick={() => void handleConfirmAction()} disabled={actionBusy}>
-              {actionBusy ? "Isleniyor..." : "Onayla"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-    </div>
+        }
+      >
+        <AdminField label="İşlem Notu" fullWidth>
+          <AdminTextarea rows={3} value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder="Audit log için not ekleyebilirsin." />
+        </AdminField>
+      </AdminModal>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../../ui/admin-ui";
+import { useState } from "react";
+import { AdminButton, AdminModal, AdminRowActionMenu, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../../ui/admin-ui";
 import { formatTrDateTimeSafe, formatTryCurrencySafe } from "../../../lib/utils/admin-format";
 import { EmployeeSelectField, EmployeeTextField, EmployeeTextareaField } from "./employee-editor-fields";
 import type { EmployeePaymentFormData, EmployeeSelectOption } from "./types";
@@ -60,6 +61,7 @@ export function PaymentsTab({
   const paymentCount = summary.paymentCount ?? 0;
   const receivableCount = summary.receivableCount ?? 0;
   const readOnly = paymentModalMode === "view";
+  const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
   const modalTitle =
     paymentModalMode === "edit"
       ? "Hareketi Duzenle"
@@ -89,15 +91,15 @@ export function PaymentsTab({
             <p className="admin-subtle-text">Odeme ve alacak hareketlerini tek merkezden yonet.</p>
           </div>
           <div className="admin-button-row">
-            <button type="button" className={`admin-outline-button ${showThisMonthOnly ? "admin-outline-button--active" : ""}`} onClick={onToggleThisMonth}>
+            <AdminButton variant="outline" className={showThisMonthOnly ? "admin-outline-button--active" : ""} onClick={onToggleThisMonth}>
               {showThisMonthOnly ? "Bu Ay Filtreli" : "Bu Ayi Goster"}
-            </button>
-            <button type="button" className="admin-outline-button" onClick={onOpenCreateReceivable}>
+            </AdminButton>
+            <AdminButton variant="outline" onClick={onOpenCreateReceivable}>
               Yeni Alacak
-            </button>
-            <button type="button" className="admin-primary-button" onClick={onOpenCreatePayment}>
+            </AdminButton>
+            <AdminButton variant="primary" onClick={onOpenCreatePayment}>
               Yeni Odeme
-            </button>
+            </AdminButton>
           </div>
         </div>
       </section>
@@ -125,8 +127,9 @@ export function PaymentsTab({
               <tbody>
                 {items.map((item) => {
                   const movementType = String(item.movementType ?? "PAYMENT");
+                  const rowId = String(item.id ?? "");
                   return (
-                    <tr key={String(item.id)}>
+                    <tr key={rowId}>
                       <td>{formatTrDateTimeSafe(String(item.paymentDate ?? ""), "-")}</td>
                       <td>
                         <AdminStatusBadge tone={movementType === "RECEIVABLE" ? "warning" : "success"}>
@@ -148,18 +151,17 @@ export function PaymentsTab({
                       </td>
                       <td>{formatTrDateTimeSafe(String(item.createdAt ?? ""), "-")}</td>
                       <td>{String(item.notes ?? "-")}</td>
-                      <td>
-                        <div className="admin-button-row">
-                          <button type="button" className="admin-ghost-button" onClick={() => onOpenPaymentView(item)}>
-                            Detay
-                          </button>
-                          <button type="button" className="admin-ghost-button" onClick={() => onOpenPaymentEdit(item)}>
-                            Duzenle
-                          </button>
-                          <button type="button" className="admin-ghost-button" onClick={() => onDeletePayment(item)}>
-                            Sil
-                          </button>
-                        </div>
+                      <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                        <AdminRowActionMenu
+                          open={actionMenuRowId === rowId}
+                          onToggle={() => setActionMenuRowId((current: string | null) => (current === rowId ? null : rowId))}
+                          onClose={() => setActionMenuRowId(null)}
+                          items={[
+                            { key: "view", label: "Detay", onSelect: () => onOpenPaymentView(item) },
+                            { key: "edit", label: "Düzenle", disabled: readOnly, onSelect: () => onOpenPaymentEdit(item) },
+                            { key: "delete", label: "Sil", tone: "danger", disabled: readOnly, onSelect: () => onDeletePayment(item) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );
@@ -173,19 +175,39 @@ export function PaymentsTab({
       </AdminTableCard>
 
       {paymentModalMode ? (
-        <div className="admin-modal-backdrop" onClick={onClosePaymentModal}>
-          <section className="admin-modal-card admin-employee-payment-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="admin-section-head">
-              <div>
-                <p className="admin-kicker">Personel Odemeleri</p>
-                <h3>{modalTitle}</h3>
+        <AdminModal
+          open={Boolean(paymentModalMode)}
+          size="md"
+          kicker="Personel / Ödemeler"
+          title={modalTitle}
+          onClose={onClosePaymentModal}
+          closeDisabled={creating}
+          footer={
+            !readOnly ? (
+              <div className="admin-modal__footer-content">
+                <div className="admin-modal__footer-left">
+                  <AdminButton variant="text" onClick={onClosePaymentModal} disabled={creating}>
+                    Vazgeç
+                  </AdminButton>
+                </div>
+                <div className="admin-modal__footer-right">
+                  <AdminButton variant="primary" onClick={onSubmitPayment} disabled={creating} loading={creating}>
+                    {creating ? "Kaydediliyor..." : paymentModalMode === "edit" ? "Güncelle" : "Kaydet"}
+                  </AdminButton>
+                </div>
               </div>
-              <button type="button" className="admin-outline-button" onClick={onClosePaymentModal}>
-                Kapat
-              </button>
-            </div>
-
-            <div className="admin-form-grid">
+            ) : (
+              <div className="admin-modal__footer-content">
+                <div className="admin-modal__footer-left">
+                  <AdminButton variant="text" onClick={onClosePaymentModal}>
+                    Kapat
+                  </AdminButton>
+                </div>
+              </div>
+            )
+          }
+        >
+          <div className="admin-form-grid">
               <EmployeeSelectField
                 label="Hareket Tipi"
                 value={paymentForm.movementType}
@@ -251,17 +273,8 @@ export function PaymentsTab({
                 onChange={(notes) => onPaymentFormChange({ ...paymentForm, notes })}
                 fullWidth
               />
-            </div>
-
-            {!readOnly ? (
-              <div className="admin-filter-actions">
-                <button type="button" className="admin-primary-button" onClick={onSubmitPayment} disabled={creating}>
-                  {creating ? "Kaydediliyor..." : paymentModalMode === "edit" ? "Guncelle" : "Kaydet"}
-                </button>
-              </div>
-            ) : null}
-          </section>
-        </div>
+          </div>
+        </AdminModal>
       ) : null}
     </div>
   );

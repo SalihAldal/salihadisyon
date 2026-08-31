@@ -11,7 +11,7 @@ import { downloadCsv } from "../../lib/utils/download";
 import { getValueByPath } from "../../lib/utils/object-path";
 import { formatReadableValue } from "../../lib/utils/readable-value";
 import { useFeatureFlag } from "../feature-flags/feature-flag-provider";
-import { AdminChartCard, AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap, resolveBadgeTone } from "../ui/admin-ui";
+import { AdminButton, AdminChartCard, AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap, resolveBadgeTone } from "../ui/admin-ui";
 import { ReportFilterForm } from "./report-filter-form";
 
 function resolveMetricMode(hint?: string) {
@@ -137,14 +137,12 @@ export function ReportScreen({ slug }: { slug?: string }) {
 
   if (!screen) {
     return (
-      <div className="dashboard-stack admin-reference-page admin-reports-page">
-        <section className="admin-page-intro">
-          <div>
-            <p className="admin-kicker">Sprint 7 / Raporlar</p>
-            <h3>Butun analiz ekranlari tek merkezde</h3>
-            <p className="admin-subtle-text">Gelişmis filtreleme, grafik, export ve karsilastirmali analiz akisi.</p>
-          </div>
-        </section>
+      <div className="admin-page-stack admin-reports-page">
+        <AdminPageHeader
+          kicker="Raporlar"
+          title="Butun analiz ekranlari tek merkezde"
+          description="Gelişmis filtreleme, grafik, export ve karsilastirmali analiz akisi."
+        />
 
         <section className="admin-module-grid">
           {reportScreens.map((item) => (
@@ -166,22 +164,20 @@ export function ReportScreen({ slug }: { slug?: string }) {
   const maxChartValue = Math.max(...report.chart.points.flatMap((point) => [point.current, point.previous]), 1);
 
   return (
-    <div className={`dashboard-stack admin-reference-page admin-reports-page admin-reports--${screen.report}`}>
-      <section className="admin-page-intro admin-reports-toolbar">
-        <AdminPageHeader
-          kicker="Sprint 7 / Raporlar"
-          title={screen.title}
-          description={screen.description}
-          className="admin-reports-toolbar"
-          actions={
-            <div className="admin-button-row admin-reports-actions">
-              <button className="admin-outline-button" type="button" onClick={handleExport}>
-                CSV Export
-              </button>
-            </div>
-          }
-        />
-      </section>
+    <div className={`admin-page-stack admin-reports-page admin-reports--${screen.report}`}>
+      <AdminPageHeader
+        kicker="Raporlar"
+        title={screen.title}
+        description={screen.description}
+        className="admin-reports-toolbar"
+        actions={
+          <div className="admin-button-row admin-reports-actions">
+            <AdminButton variant="outline" onClick={handleExport}>
+              CSV Export
+            </AdminButton>
+          </div>
+        }
+      />
 
       {isNewReportScreenEnabled ? <AdminStatusBadge tone="info">Yeni rapor deneyimi aktif</AdminStatusBadge> : null}
       {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}

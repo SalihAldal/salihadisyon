@@ -18,6 +18,7 @@ export interface ApiRuntimeEnv {
   monitoringAlertStatusCodes: string;
   monitoringAlertErrorCodes: string;
   monitoringAlertDedupMs: number;
+  authLoginRateLimitEnabled: boolean;
 }
 
 export interface WebRuntimeEnv {
@@ -42,7 +43,7 @@ export function getApiRuntimeEnv(env?: Record<string, string | undefined>): ApiR
   return {
     nodeEnv: source.NODE_ENV ?? "development",
     appEnv: source.APP_ENV ?? "local",
-    port: Number(source.PORT ?? 4000),
+    port: Number(source.PORT ?? 4100),
     apiCurrentVersion: source.API_CURRENT_VERSION ?? "v1",
     apiSupportedVersions: source.API_SUPPORTED_VERSIONS ?? "v1,v2",
     databaseUrl: source.DATABASE_URL ?? "",
@@ -59,7 +60,48 @@ export function getApiRuntimeEnv(env?: Record<string, string | undefined>): ApiR
     monitoringAlertStatusCodes: source.MONITORING_ALERT_STATUS_CODES ?? "500,502,503,504",
     monitoringAlertErrorCodes: source.MONITORING_ALERT_ERROR_CODES ?? "INTERNAL_ERROR",
     monitoringAlertDedupMs: Number(source.MONITORING_ALERT_DEDUP_MS ?? 300000),
+    authLoginRateLimitEnabled: resolveAuthLoginRateLimitEnabled(source),
   };
+}
+
+function resolveAuthLoginRateLimitEnabled(source: Record<string, string | undefined>) {
+  const explicit = source.AUTH_LOGIN_RATE_LIMIT_ENABLED?.trim().toLowerCase();
+  if (explicit === "true" || explicit === "1") return true;
+  if (explicit === "false" || explicit === "0") return false;
+  const appEnv = source.APP_ENV ?? "local";
+  const nodeEnv = source.NODE_ENV ?? "development";
+  return appEnv === "production" || nodeEnv === "production";
+}
+
+const INSECURE_JWT_SECRETS = new Set(["", "change-me-access", "change-me-refresh", "changeme", "secret"]);
+
+export function assertProductionRuntimeConfig(env?: Record<string, string | undefined>) {
+  const config = getApiRuntimeEnv(env);
+  const isProduction = config.nodeEnv === "production" || config.appEnv === "production";
+
+  if (!isProduction) {
+    return;
+  }
+
+  const problems: string[] = [];
+
+  if (!config.databaseUrl.trim()) {
+    problems.push("DATABASE_URL");
+  }
+
+  if (INSECURE_JWT_SECRETS.has(config.jwtAccessSecret.trim())) {
+    problems.push("JWT_ACCESS_SECRET");
+  }
+
+  if (INSECURE_JWT_SECRETS.has(config.jwtRefreshSecret.trim())) {
+    problems.push("JWT_REFRESH_SECRET");
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Production runtime config gecersiz: ${problems.join(", ")}. Varsayilan secret veya bos env kullanilamaz.`,
+    );
+  }
 }
 
 export function getWebRuntimeEnv(env?: Record<string, string | undefined>): WebRuntimeEnv {

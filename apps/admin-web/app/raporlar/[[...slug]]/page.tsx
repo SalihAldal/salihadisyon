@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { ReportScreen } from "../../../components/reports/report-screen";
+import { AdminStateCard } from "../../../components/ui/admin-ui";
 
 export default async function ReportsPage({
   params,
@@ -8,7 +9,7 @@ export default async function ReportsPage({
 }) {
   const resolved = await params;
   return (
-    <Suspense fallback={<div className="admin-surface admin-empty-state">Rapor yukleniyor...</div>}>
+    <Suspense fallback={<AdminStateCard tone="info" message="Rapor yukleniyor..." />}>
       <ReportScreen slug={resolved.slug?.[0]} />
     </Suspense>
   );

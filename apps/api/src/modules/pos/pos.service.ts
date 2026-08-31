@@ -23,13 +23,38 @@ import { OpenRegisterDto } from "./dto/open-register.dto";
 import { PrinterDispatchDto } from "./dto/printer-dispatch.dto";
 import { RefundTicketDto } from "./dto/refund-ticket.dto";
 import { SplitTicketDto } from "./dto/split-ticket.dto";
+import { SplitTicketByPersonDto } from "./dto/split-ticket-by-person.dto";
+import {
+  computeSplitLineParts,
+  validatePersonAllocations,
+  validateSplitLines,
+  type SplitLineInput,
+} from "./split-ticket.core";
+import {
+  calculateCompAmount,
+  calculateDiscountAmount,
+  canSelfApprove,
+  isManagerRole,
+  requiresManagerApproval,
+  resolveDiscountBaseAmount,
+  roundFinancial,
+  validateMutationReason,
+  type DiscountKind,
+} from "./financial-mutation.core";
+import { ApplyTicketDiscountDto } from "./dto/apply-ticket-discount.dto";
+import { VoidTicketItemDto } from "./dto/void-ticket-item.dto";
+import { ResolveApprovalDto } from "./dto/resolve-approval.dto";
 import { TransferTicketDto } from "./dto/transfer-ticket.dto";
 import { UpdateTicketDto } from "./dto/update-ticket.dto";
 import { UpdateTicketItemDto } from "./dto/update-ticket-item.dto";
-import { ApplyTicketDiscountDto } from "./dto/apply-ticket-discount.dto";
 import { PosAdminService } from "./pos-admin.service";
 import { PosRegisterService } from "./pos-register.service";
 import { PosReportsService } from "./pos-reports.service";
+import { PrintRoutingService } from "./print-routing.service";
+import { buildPrinterTestContent, buildSlipContent } from "./print-template.service";
+import { shouldSkipDuplicatePrint } from "./print-routing.core";
+import { TicketPrintDispatchDto, PrinterBridgeAckDto, PrinterConnectionTestDto } from "./dto/print-routing.dto";
+import { createConnection } from "net";
 
 type PosActor = {
   tenantId: string;
@@ -56,6 +81,7 @@ export class PosService {
     private readonly posAdminService: PosAdminService,
     private readonly posRegisterService: PosRegisterService,
     private readonly posReportsService: PosReportsService,
+    private readonly printRoutingService: PrintRoutingService,
   ) {}
 
   async openRegister(dto: OpenRegisterDto, actor: PosActor) {
@@ -153,7 +179,24 @@ export class PosService {
 
   async getTicketDetail(ticketId: string, actor: PosActor) {
     const ticket = await this.getTicketOrThrow(ticketId, actor);
-    return this.serializeTicket(ticket);
+    const serialized = this.serializeTicket(ticket);
+    const resolvedGroupId = ticket.splitGroupId ?? ticket.id;
+    const siblings = await this.prisma.ticket.findMany({
+      where: {
+        companyId: actor.tenantId,
+        branchId: ticket.branchId,
+        OR: [{ splitGroupId: resolvedGroupId }, { id: resolvedGroupId }],
+      },
+        include: {
+          customer: true,
+          table: true,
+          items: true,
+          payments: true,
+        },
+        orderBy: { openedAt: "asc" },
+    });
+    serialized.splitAccounts = siblings.length > 1 ? siblings.map((row) => this.serializeTicket(row)) : [];
+    return serialized;
   }
 
   async getCatalog(actor: PosActor, branchId?: string) {
@@ -307,7 +350,11 @@ export class PosService {
   }
 
   async updateTicket(ticketId: string, dto: UpdateTicketDto, actor: PosActor) {
-    this.ensureWaiterCanRun(actor, "Adisyon guncelleme");
+    const dtoKeys = Object.entries(dto).filter(([, value]) => value !== undefined).map(([key]) => key);
+    const coverCountOnly = dtoKeys.length === 1 && dtoKeys[0] === "coverCount";
+    if (!coverCountOnly) {
+      this.ensureWaiterCanRun(actor, "Adisyon guncelleme");
+    }
     const ticket = await this.getTicketOrThrow(ticketId, actor);
     this.ensureTicketEditable(ticket);
     const nextTableId = dto.tableId === undefined ? ticket.tableId : dto.tableId;
@@ -345,11 +392,77 @@ export class PosService {
     return this.getTicketDetail(ticketId, actor);
   }
 
+  async requestBill(ticketId: string, actor: PosActor) {
+    const ticket = await this.getTicketOrThrow(ticketId, actor);
+    this.ensureTicketEditable(ticket);
+
+    if (ticket.billRequestedAt) {
+      return this.getTicketDetail(ticketId, actor);
+    }
+
+    const now = new Date();
+    await this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        billRequestedAt: now,
+        billRequestedByUserId: actor.userId,
+      },
+    });
+
+    await this.createTicketEvent(ticketId, "bill_requested", {
+      userId: actor.userId,
+      requestedAt: now.toISOString(),
+    });
+
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: ticket.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "ticket.bill.request",
+      entityType: "ticket",
+      entityId: ticketId,
+      payload: {
+        tableId: ticket.tableId ?? null,
+        requestedAt: now.toISOString(),
+      },
+    });
+
+    const billPayload = {
+      branchId: ticket.branchId,
+      ticketId,
+      tableId: ticket.tableId,
+      billRequestedAt: now.toISOString(),
+    };
+    this.posGateway.emitToBranch(ticket.branchId, "pos.bill.requested", billPayload);
+    this.posGateway.emitToBranch(ticket.branchId, "bill.requested", billPayload);
+
+    await this.broadcastTicketUpdate(ticketId);
+    return this.getTicketDetail(ticketId, actor);
+  }
+
+  async listTicketEvents(ticketId: string, actor: PosActor) {
+    await this.getTicketOrThrow(ticketId, actor);
+    const events = await this.prisma.ticketEvent.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return {
+      items: events.map((event) => ({
+        id: event.id,
+        type: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt.toISOString(),
+      })),
+    };
+  }
+
   async addItem(ticketId: string, dto: AddTicketItemDto, actor: PosActor) {
     const ticket = await this.getTicketOrThrow(ticketId, actor);
     this.ensureTicketEditable(ticket);
 
-    return this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const pricedLine = await this.resolveLinePricing(tx, ticket.branchId, dto.productId, dto.variantIds, dto.modifierOptionIds, dto.requiredChoiceOptionIds);
 
       const item = await tx.ticketItem.create({
@@ -362,6 +475,7 @@ export class PosService {
           lineTotal: pricedLine.unitPrice * dto.quantity,
           notes: dto.note ?? null,
           modifiersJson: pricedLine.modifiersJson,
+          addedByUserId: actor.userId,
         },
       });
 
@@ -370,7 +484,7 @@ export class PosService {
         data: {
           ticketId,
           type: "item_added",
-          payload: { itemId: item.id, quantity: dto.quantity, modifiersJson: pricedLine.modifiersJson },
+          payload: { itemId: item.id, quantity: dto.quantity, modifiersJson: pricedLine.modifiersJson, addedByUserId: actor.userId },
         },
       });
 
@@ -382,6 +496,7 @@ export class PosService {
         : null;
 
       await this.auditLogService.create({
+        executor: tx,
         companyId: actor.tenantId,
         branchId: ticket.branchId,
         userId: actor.userId,
@@ -398,9 +513,10 @@ export class PosService {
           enteredAt: new Date().toISOString(),
         },
       });
-
-      return this.getTicketDetail(ticketId, actor);
     });
+
+    await this.broadcastTicketUpdate(ticketId);
+    return this.getTicketDetail(ticketId, actor);
   }
 
   async updateItem(ticketId: string, itemId: string, dto: UpdateTicketItemDto, actor: PosActor) {
@@ -412,7 +528,7 @@ export class PosService {
       throw new NotFoundException("Adisyon satiri bulunamadi.");
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const currentModifiers = (item.modifiersJson ?? {}) as Record<string, unknown>;
       const variantIds = dto.variantIds ?? ((currentModifiers.variantIds as string[]) ?? []);
       const modifierOptionIds = dto.modifierOptionIds ?? ((currentModifiers.modifierOptionIds as string[]) ?? []);
@@ -446,8 +562,10 @@ export class PosService {
           payload: { itemId, quantity },
         },
       });
-      return this.getTicketDetail(ticketId, actor);
     });
+
+    await this.broadcastTicketUpdate(ticketId);
+    return this.getTicketDetail(ticketId, actor);
   }
 
   async removeItem(ticketId: string, itemId: string, actor: PosActor) {
@@ -530,35 +648,439 @@ export class PosService {
     const ticket = await this.getTicketOrThrow(ticketId, actor);
     this.ensureTicketEditable(ticket);
 
-    const discount = await this.prisma.ticketDiscount.create({
-      data: {
-        companyId: actor.tenantId,
-        branchId: ticket.branchId,
+    let reason: string;
+    try {
+      reason = validateMutationReason(dto.reason);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Gecersiz gerekce.");
+    }
+
+    const discountKind: DiscountKind = dto.discountKind ?? "DISCOUNT";
+    if (discountKind === "COMP" && !dto.ticketItemId) {
+      throw new BadRequestException("Ikram yalnizca urun satiri bazinda uygulanabilir.");
+    }
+
+    const items = (ticket.items ?? []).map((item) => ({
+      id: item.id,
+      lineTotal: Number(item.lineTotal),
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+    }));
+
+    let baseAmount: number;
+    try {
+      baseAmount = resolveDiscountBaseAmount({
+        ticketItemId: dto.ticketItemId ?? null,
+        items,
+        ticketSubtotal: Number(ticket.subtotal),
+        ticketGrandTotal: Number(ticket.grandTotal),
+      });
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Indirim taban tutari gecersiz.");
+    }
+
+    let amount: number;
+    let percentage: number | null = null;
+    try {
+      if (discountKind === "COMP") {
+        const item = items.find((row) => row.id === dto.ticketItemId);
+        amount = calculateCompAmount(Number(item?.lineTotal ?? 0));
+      } else {
+        amount = calculateDiscountAmount({
+          baseAmount,
+          amount: dto.amount,
+          percentage: dto.percentage,
+          discountType: dto.discountType,
+        });
+        if (dto.percentage !== undefined && dto.percentage !== null) {
+          percentage = Number(dto.percentage);
+        }
+      }
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Indirim tutari gecersiz.");
+    }
+
+    const needsApproval = requiresManagerApproval({
+      discountKind,
+      actorRole: actor.role,
+      approvalRequired: dto.approvalRequired,
+    });
+    const beforeGrandTotal = Number(ticket.grandTotal);
+
+    const discount = await this.runSerializableTransaction(async (tx) => {
+      let approvalRequestId: string | null = null;
+      if (needsApproval) {
+        const approval = await tx.approvalRequest.create({
+          data: {
+            companyId: actor.tenantId,
+            branchId: ticket.branchId,
+            module: "pos",
+            action: discountKind === "COMP" ? "ticket.comp" : "ticket.discount",
+            referenceType: "ticket",
+            referenceId: ticketId,
+            requestedByUserId: actor.userId,
+            reason,
+            payload: {
+              ticketItemId: dto.ticketItemId ?? null,
+              amount,
+              discountKind,
+              label: dto.label,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        approvalRequestId = approval.id;
+      }
+
+      const created = await tx.ticketDiscount.create({
+        data: {
+          companyId: actor.tenantId,
+          branchId: ticket.branchId,
+          ticketId,
+          ticketItemId: dto.ticketItemId ?? null,
+          discountType: dto.discountType,
+          discountKind,
+          label: dto.label,
+          amount,
+          originalAmount: baseAmount,
+          percentage: percentage ?? undefined,
+          reason,
+          approvalRequired: needsApproval,
+          approvalRequestId,
+          status: needsApproval ? "pending" : "applied",
+          approvedByUserId: needsApproval ? null : actor.userId,
+          createdByUserId: actor.userId,
+        },
+      });
+
+      if (!needsApproval) {
+        await this.syncItemDiscountTotals(tx, ticketId, dto.ticketItemId ?? null);
+        await this.recalculateTicketTotals(tx, ticketId);
+      }
+
+      return created;
+    });
+
+    const afterDetail = needsApproval ? null : await this.getTicketOrThrow(ticketId, actor);
+    const auditAction = discountKind === "COMP" ? "ticket.comp" : "ticket.discount";
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: ticket.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: auditAction,
+      entityType: "ticket_discount",
+      entityId: discount.id,
+      payload: {
         ticketId,
         ticketItemId: dto.ticketItemId ?? null,
-        discountType: dto.discountType,
+        discountKind,
         label: dto.label,
-        amount: dto.amount,
-        approvalRequired: dto.approvalRequired ?? false,
-        approvedByUserId: dto.approvalRequired ? null : actor.userId,
+        amount,
+        originalAmount: baseAmount,
+        percentage,
+        reason,
+        approvalRequired: needsApproval,
+        approvalRequestId: discount.approvalRequestId,
+        status: discount.status,
+      },
+      oldValues: { grandTotal: beforeGrandTotal },
+      newValues: {
+        grandTotal: afterDetail ? Number(afterDetail.grandTotal) : beforeGrandTotal,
+        discountAmount: amount,
+        status: discount.status,
+      },
+      ipAddress: actor.ipAddress ?? null,
+      userAgent: actor.userAgent ?? null,
+      deviceInfo: actor.deviceInfo ?? actor.terminalId ?? null,
+    });
+
+    await this.createTicketEvent(ticketId, discountKind === "COMP" ? "comp_applied" : "discount_applied", {
+      discountId: discount.id,
+      amount,
+      status: discount.status,
+      reason,
+    });
+
+    if (needsApproval) {
+      this.posGateway.emitToBranch(ticket.branchId, "approval.required", {
+        approvalRequestId: discount.approvalRequestId,
+        action: auditAction,
+        requestedByUserId: actor.userId,
+        ticketId,
+      });
+    } else {
+      this.posGateway.emitToBranch(ticket.branchId, discountKind === "COMP" ? "ticket.comp" : "ticket.discount", {
+        ticketId,
+        discountId: discount.id,
+        amount,
+      });
+      await this.broadcastTicketUpdate(ticketId);
+    }
+
+    return this.getTicketDetail(ticketId, actor);
+  }
+
+  async voidItem(ticketId: string, itemId: string, dto: VoidTicketItemDto, actor: PosActor) {
+    this.ensureWaiterCanRun(actor, "Urun iptali");
+    let reason: string;
+    try {
+      reason = validateMutationReason(dto.reason);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Gecersiz gerekce.");
+    }
+
+    const ticket = await this.getTicketOrThrow(ticketId, actor);
+    this.ensureTicketEditable(ticket);
+    const item = (ticket.items ?? []).find((row) => row.id === itemId);
+    if (!item) {
+      throw new NotFoundException("Adisyon satiri bulunamadi.");
+    }
+
+    const voidQuantity = dto.quantity ?? Number(item.quantity);
+    if (!Number.isFinite(voidQuantity) || voidQuantity <= 0) {
+      throw new BadRequestException("Iptal miktari gecersiz.");
+    }
+    if (voidQuantity > Number(item.quantity) + 0.0001) {
+      throw new BadRequestException("Iptal miktari mevcut miktardan buyuk olamaz.");
+    }
+
+    const beforeGrandTotal = Number(ticket.grandTotal);
+    const originalAmount = Number(item.lineTotal);
+    const ticketTable = ticket.table
+      ? { tableId: ticket.table.id ?? null, tableName: ticket.table.name ?? null, tableCode: ticket.table.code ?? null }
+      : { tableId: ticket.tableId ?? null, tableName: null, tableCode: null };
+
+    await this.runSerializableTransaction(async (tx) => {
+      const liveItem = await tx.ticketItem.findUnique({ where: { id: itemId } });
+      if (!liveItem || liveItem.ticketId !== ticketId) {
+        throw new NotFoundException("Adisyon satiri bulunamadi.");
+      }
+      const liveQty = Number(liveItem.quantity);
+      if (voidQuantity > liveQty + 0.0001) {
+        throw new BadRequestException("Iptal miktari mevcut miktardan buyuk olamaz.");
+      }
+
+      const sentEvents = await tx.ticketEvent.count({
+        where: {
+          ticketId,
+          type: { in: ["print_dispatched", "sent_to_kitchen"] },
+        },
+      });
+      const wasSent = sentEvents > 0;
+
+      if (voidQuantity >= liveQty - 0.0001) {
+        await tx.ticketItem.delete({ where: { id: itemId } });
+        await tx.ticketDiscount.deleteMany({ where: { ticketId, ticketItemId: itemId } });
+      } else {
+        const remainingQty = roundFinancial(liveQty - voidQuantity);
+        const unitPrice = Number(liveItem.unitPrice);
+        await tx.ticketItem.update({
+          where: { id: itemId },
+          data: {
+            quantity: remainingQty,
+            lineTotal: roundFinancial(unitPrice * remainingQty),
+          },
+        });
+      }
+
+      await this.recalculateTicketTotals(tx, ticketId);
+      const liveTicket = await tx.ticket.findUnique({ where: { id: ticketId }, include: { payments: true } });
+      if (!liveTicket) {
+        throw new NotFoundException("Adisyon bulunamadi.");
+      }
+      const paidTotal = this.roundCurrency((liveTicket.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount), 0));
+      const nextGrandTotal = this.roundCurrency(Number(liveTicket.grandTotal));
+      if (paidTotal > nextGrandTotal + 0.01) {
+        throw new BadRequestException("Odeme alinmis tutar yeni toplamin uzerinde. Once iade gerekir.");
+      }
+
+      await tx.ticketEvent.create({
+        data: {
+          ticketId,
+          type: "item_voided",
+          payload: {
+            itemId,
+            reason,
+            quantity: voidQuantity,
+            originalAmount,
+            wasSent,
+          },
+        },
+      });
+
+      await this.auditLogService.create({
+        executor: tx,
+        companyId: actor.tenantId,
+        branchId: ticket.branchId,
+        userId: actor.userId,
+        module: "pos",
+        action: "ticket.item.void",
+        entityType: "ticket_item",
+        entityId: itemId,
+        payload: {
+          ticketId,
+          ...ticketTable,
+          productId: item.productId ?? null,
+          productName: item.productName,
+          quantity: voidQuantity,
+          originalAmount,
+          reason,
+          wasSent,
+          voidedAt: new Date().toISOString(),
+        },
+        oldValues: { grandTotal: beforeGrandTotal, itemQuantity: liveQty, itemLineTotal: originalAmount },
+        newValues: { grandTotal: nextGrandTotal, voidQuantity, reason },
+      });
+    });
+
+    this.posGateway.emitToTicket(ticketId, "ticket.item.voided", { ticketId, itemId, reason });
+    this.posGateway.emitToTicket(ticketId, "pos.ticket.item.voided", { ticketId, itemId, reason });
+    await this.broadcastTicketUpdate(ticketId);
+    return this.getTicketDetail(ticketId, actor);
+  }
+
+  async approveApprovalRequest(approvalId: string, dto: ResolveApprovalDto, actor: PosActor) {
+    if (!isManagerRole(actor.role)) {
+      throw new ForbiddenException("Onay yetkiniz yok.");
+    }
+
+    const resolved = await this.runSerializableTransaction(async (tx) => {
+      const approval = await tx.approvalRequest.findUnique({ where: { id: approvalId } });
+      if (!approval || approval.companyId !== actor.tenantId) {
+        throw new NotFoundException("Onay talebi bulunamadi.");
+      }
+      this.ensureBranchAccess(actor, approval.branchId);
+      if (approval.status !== "pending") {
+        throw new BadRequestException("Onay talebi zaten sonuclandi.");
+      }
+      if (canSelfApprove(actor.userId, approval.requestedByUserId)) {
+        throw new ForbiddenException("Kendi isleminizi onaylayamazsiniz.");
+      }
+
+      const updatedApproval = await tx.approvalRequest.update({
+        where: { id: approvalId },
+        data: {
+          status: "approved",
+          approvedByUserId: actor.userId,
+          approvedAt: new Date(),
+          payload: {
+            ...((approval.payload as Record<string, unknown> | null) ?? {}),
+            approvalNote: dto.note ?? null,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      const discount = await tx.ticketDiscount.findFirst({ where: { approvalRequestId: approvalId } });
+      if (discount) {
+        await tx.ticketDiscount.update({
+          where: { id: discount.id },
+          data: { status: "applied", approvedByUserId: actor.userId },
+        });
+        await this.syncItemDiscountTotals(tx, discount.ticketId, discount.ticketItemId);
+        await this.recalculateTicketTotals(tx, discount.ticketId);
+      }
+
+      return { approval: updatedApproval, discount };
+    });
+
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: resolved.approval.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "approval.approve",
+      entityType: "approval_request",
+      entityId: approvalId,
+      payload: {
+        referenceType: resolved.approval.referenceType,
+        referenceId: resolved.approval.referenceId,
+        note: dto.note ?? null,
+        discountId: resolved.discount?.id ?? null,
       },
     });
 
-    await this.prisma.$transaction(async (tx) => {
-      if (dto.ticketItemId) {
-        const discounts = await tx.ticketDiscount.findMany({ where: { ticketId, ticketItemId: dto.ticketItemId } });
-        const itemDiscountTotal = discounts.reduce((sum, row) => sum + Number(row.amount), 0);
-        await tx.ticketItem.update({
-          where: { id: dto.ticketItemId },
-          data: { discountTotal: itemDiscountTotal },
-        });
-      }
-      await this.recalculateTicketTotals(tx, ticketId);
+    if (resolved.discount) {
+      await this.broadcastTicketUpdate(resolved.discount.ticketId);
+    }
+
+    this.posGateway.emitToBranch(resolved.approval.branchId, "approval.resolved", {
+      approvalRequestId: approvalId,
+      status: "approved",
     });
 
-    await this.createTicketEvent(ticketId, "discount_applied", discount);
-    await this.broadcastTicketUpdate(ticketId);
-    return this.getTicketDetail(ticketId, actor);
+    return resolved.approval;
+  }
+
+  async rejectApprovalRequest(approvalId: string, dto: ResolveApprovalDto, actor: PosActor) {
+    if (!isManagerRole(actor.role)) {
+      throw new ForbiddenException("Onay yetkiniz yok.");
+    }
+
+    const resolved = await this.runSerializableTransaction(async (tx) => {
+      const approval = await tx.approvalRequest.findUnique({ where: { id: approvalId } });
+      if (!approval || approval.companyId !== actor.tenantId) {
+        throw new NotFoundException("Onay talebi bulunamadi.");
+      }
+      this.ensureBranchAccess(actor, approval.branchId);
+      if (approval.status !== "pending") {
+        throw new BadRequestException("Onay talebi zaten sonuclandi.");
+      }
+      if (canSelfApprove(actor.userId, approval.requestedByUserId)) {
+        throw new ForbiddenException("Kendi isleminizi reddedemezsiniz.");
+      }
+
+      const updatedApproval = await tx.approvalRequest.update({
+        where: { id: approvalId },
+        data: {
+          status: "rejected",
+          approvedByUserId: actor.userId,
+          approvedAt: new Date(),
+          payload: {
+            ...((approval.payload as Record<string, unknown> | null) ?? {}),
+            rejectionNote: dto.note ?? null,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await tx.ticketDiscount.updateMany({
+        where: { approvalRequestId: approvalId, status: "pending" },
+        data: { status: "rejected" },
+      });
+
+      return updatedApproval;
+    });
+
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: resolved.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "approval.reject",
+      entityType: "approval_request",
+      entityId: approvalId,
+      payload: { note: dto.note ?? null },
+    });
+
+    this.posGateway.emitToBranch(resolved.branchId, "approval.resolved", {
+      approvalRequestId: approvalId,
+      status: "rejected",
+    });
+
+    return resolved;
+  }
+
+  private async syncItemDiscountTotals(tx: Prisma.TransactionClient, ticketId: string, ticketItemId: string | null) {
+    if (!ticketItemId) {
+      return;
+    }
+    const discounts = await tx.ticketDiscount.findMany({
+      where: { ticketId, ticketItemId, status: "applied" },
+    });
+    const itemDiscountTotal = discounts.reduce((sum, row) => sum + Number(row.amount), 0);
+    await tx.ticketItem.update({
+      where: { id: ticketItemId },
+      data: { discountTotal: itemDiscountTotal },
+    });
   }
 
   async collectPayment(dto: CollectPaymentDto, actor: PosActor) {
@@ -695,6 +1217,8 @@ export class PosService {
         data: {
           status: isFullyPaid ? "PAID" : "PAYMENT_PENDING",
           closedAt: isFullyPaid ? new Date() : null,
+          billRequestedAt: null,
+          billRequestedByUserId: null,
         },
       });
       if (isFullyPaid && liveTicket.tableId) {
@@ -786,88 +1310,240 @@ export class PosService {
   async splitTicket(ticketId: string, dto: SplitTicketDto, actor: PosActor) {
     this.ensureWaiterCanRun(actor, "Adisyon bolme");
     const source = await this.getTicketOrThrow(ticketId, actor);
-    this.ensureTicketEditable(source);
-    const result = await this.prisma.$transaction(async (tx) => {
-      const sourceItems = await tx.ticketItem.findMany({ where: { ticketId } });
-      const target = await tx.ticket.create({
-        data: {
-          companyId: source.companyId,
-          branchId: source.branchId,
-          customerId: source.customerId,
-          channel: (dto.targetChannel as any) ?? source.channel,
-          ticketName: dto.ticketName ?? `${source.ticketName ?? "Adisyon"} / Bolum`,
-          coverCount: source.coverCount,
-          status: "OPEN",
-        },
-      });
+    this.ensureTicketSplittable(source);
 
-      for (const line of dto.items) {
-        const item = sourceItems.find((candidate) => candidate.id === line.itemId);
-        if (!item) {
-          throw new NotFoundException("Bolunecek satir bulunamadi.");
-        }
-        if (Number(item.quantity) < line.quantity) {
-          throw new BadRequestException("Bolunecek miktar mevcut miktardan buyuk olamaz.");
-        }
+    const sourceItems = source.items.map((item) => ({
+      id: item.id,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+      discountTotal: Number(item.discountTotal),
+      taxTotal: Number(item.taxTotal),
+      lineTotal: Number(item.lineTotal),
+    }));
 
-        await tx.ticketItem.create({
-          data: {
-            ticketId: target.id,
-            productId: item.productId,
-            productName: item.productName,
-            quantity: line.quantity,
-            unitPrice: item.unitPrice,
-            discountTotal: 0,
-            taxTotal: 0,
-            lineTotal: Number(item.unitPrice) * line.quantity,
-            notes: item.notes,
-            modifiersJson: (item.modifiersJson ?? undefined) as any,
-          },
-        });
+    try {
+      validateSplitLines(dto.items, sourceItems);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Gecersiz bolme istegi.");
+    }
 
-        const remainingQty = Number(item.quantity) - line.quantity;
-        if (remainingQty <= 0) {
-          await tx.ticketItem.delete({ where: { id: item.id } });
-        } else {
-          await tx.ticketItem.update({
-            where: { id: item.id },
-            data: {
-              quantity: remainingQty,
-              lineTotal: Number(item.unitPrice) * remainingQty,
-            },
-          });
-        }
-      }
+    const splitGroupId = source.splitGroupId ?? source.id;
+    const result = await this.runSerializableTransaction(async (tx) =>
+      this.executeSplitToTarget(tx, {
+        source,
+        lines: dto.items,
+        actor,
+        splitGroupId,
+        ticketName: dto.ticketName ?? `${source.ticketName ?? "Adisyon"} / Bolum`,
+        targetChannel: dto.targetChannel ?? source.channel,
+        splitMethod: "item_quantity",
+      }),
+    );
 
-      await this.recalculateTicketTotals(tx, ticketId);
-      await this.recalculateTicketTotals(tx, target.id);
-      return target;
+    await this.createTicketEvent(ticketId, "ticket_split", {
+      targetTicketId: result.target.id,
+      items: dto.items,
+      splitMethod: "item_quantity",
     });
 
-    await this.createTicketEvent(ticketId, "ticket_split", dto);
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: source.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "ticket.split",
+      entityType: "ticket",
+      entityId: ticketId,
+      payload: {
+        splitMethod: "item_quantity",
+        targetTicketId: result.target.id,
+        items: dto.items,
+      },
+      oldValues: {
+        sourceTicketId: ticketId,
+        sourceItemCount: source.items.length,
+        sourceGrandTotal: Number(source.grandTotal),
+      },
+      newValues: {
+        targetTicketId: result.target.id,
+        targetGrandTotal: Number(result.target.grandTotal),
+        movedLines: dto.items,
+      },
+      ipAddress: actor.ipAddress ?? null,
+      userAgent: actor.userAgent ?? null,
+      deviceInfo: actor.deviceInfo ?? actor.terminalId ?? null,
+    });
+
+    this.posGateway.emitToBranch(source.branchId, "ticket.split", {
+      sourceTicketId: ticketId,
+      targetTicketId: result.target.id,
+      splitGroupId,
+    });
+    this.posGateway.emitToTicket(ticketId, "pos.ticket.split", { targetTicketId: result.target.id });
+    this.posGateway.emitToTicket(result.target.id, "pos.ticket.split", { sourceTicketId: ticketId });
+
     await this.broadcastTicketUpdate(ticketId);
-    await this.broadcastTicketUpdate(result.id);
+    await this.broadcastTicketUpdate(result.target.id);
+
     return {
       source: await this.getTicketDetail(ticketId, actor),
-      target: await this.getTicketDetail(result.id, actor),
+      target: await this.getTicketDetail(result.target.id, actor),
+      splitGroupId,
     };
   }
 
-  async mergeTickets(dto: MergeTicketDto, actor: PosActor) {
-    this.ensureWaiterCanRun(actor, "Adisyon birlestirme");
-    const source = await this.getTicketOrThrow(dto.sourceTicketId, actor);
-    const target = await this.getTicketOrThrow(dto.targetTicketId, actor);
-    this.ensureTicketEditable(source);
-    this.ensureTicketEditable(target);
-    if (source.branchId !== target.branchId) {
-      throw new BadRequestException("Sadece ayni subedeki adisyonlar birlestirilebilir.");
+  async splitTicketByPerson(ticketId: string, dto: SplitTicketByPersonDto, actor: PosActor) {
+    this.ensureWaiterCanRun(actor, "Adisyon bolme");
+    const source = await this.getTicketOrThrow(ticketId, actor);
+    this.ensureTicketSplittable(source);
+
+    const sourceItems = source.items.map((item) => ({
+      id: item.id,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+      discountTotal: Number(item.discountTotal),
+      taxTotal: Number(item.taxTotal),
+      lineTotal: Number(item.lineTotal),
+    }));
+
+    try {
+      validatePersonAllocations(dto.persons, sourceItems);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Gecersiz kisi bazli bolme istegi.");
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const splitGroupId = source.splitGroupId ?? source.id;
+    const targets: Array<{ id: string; personLabel: string | null; grandTotal: number }> = [];
+
+    await this.runSerializableTransaction(async (tx) => {
+      for (const [index, person] of dto.persons.entries()) {
+        const liveSource = await tx.ticket.findUniqueOrThrow({
+          where: { id: ticketId },
+          include: { items: true, payments: true, table: true, customer: true },
+        });
+        this.ensureTicketSplittable(liveSource);
+        const label = person.label?.trim() || `Kisi ${index + 1}`;
+        const created = await this.executeSplitToTarget(tx, {
+          source: liveSource,
+          lines: person.items,
+          actor,
+          splitGroupId,
+          ticketName: `${liveSource.ticketName ?? "Adisyon"} / ${label}`,
+          targetChannel: dto.targetChannel ?? liveSource.channel,
+          splitMethod: "by_person",
+          personLabel: label,
+        });
+        targets.push({
+          id: created.target.id,
+          personLabel: label,
+          grandTotal: Number(created.target.grandTotal),
+        });
+      }
+    });
+
+    await this.createTicketEvent(ticketId, "ticket_split_by_person", {
+      splitGroupId,
+      persons: dto.persons.map((person, index) => ({
+        label: person.label ?? `Kisi ${index + 1}`,
+        items: person.items,
+      })),
+      targets,
+    });
+
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: source.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "ticket.split.by_person",
+      entityType: "ticket",
+      entityId: ticketId,
+      payload: {
+        splitGroupId,
+        persons: dto.persons,
+        targets,
+      },
+      oldValues: {
+        sourceTicketId: ticketId,
+        sourceGrandTotal: Number(source.grandTotal),
+      },
+      newValues: {
+        targetTicketIds: targets.map((row) => row.id),
+      },
+      ipAddress: actor.ipAddress ?? null,
+      userAgent: actor.userAgent ?? null,
+      deviceInfo: actor.deviceInfo ?? actor.terminalId ?? null,
+    });
+
+    this.posGateway.emitToBranch(source.branchId, "ticket.split", {
+      sourceTicketId: ticketId,
+      targetTicketIds: targets.map((row) => row.id),
+      splitGroupId,
+    });
+    await this.broadcastTicketUpdate(ticketId);
+    for (const target of targets) {
+      await this.broadcastTicketUpdate(target.id);
+    }
+
+    return {
+      source: await this.getTicketDetail(ticketId, actor),
+      targets: await Promise.all(targets.map((target) => this.getTicketDetail(target.id, actor))),
+      splitGroupId,
+    };
+  }
+
+  async mergeTickets(dto: MergeTicketDto, actor: PosActor, pathTicketId?: string) {
+    this.ensureWaiterCanRun(actor, "Adisyon birlestirme");
+    if (pathTicketId && pathTicketId !== dto.targetTicketId) {
+      throw new BadRequestException("Birlestirme hedefi URL ile uyusmuyor.");
+    }
+    if (dto.sourceTicketId === dto.targetTicketId) {
+      throw new BadRequestException("Kaynak ve hedef adisyon ayni olamaz.");
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const [source, target] = await Promise.all([
+        tx.ticket.findUnique({
+          where: { id: dto.sourceTicketId },
+          include: { items: true, payments: true, table: true },
+        }),
+        tx.ticket.findUnique({
+          where: { id: dto.targetTicketId },
+          include: { items: true, payments: true, table: true },
+        }),
+      ]);
+
+      if (!source || source.companyId !== actor.tenantId || !actor.branchIds.includes(source.branchId)) {
+        throw new NotFoundException("Kaynak adisyon bulunamadi.");
+      }
+      if (!target || target.companyId !== actor.tenantId || !actor.branchIds.includes(target.branchId)) {
+        throw new NotFoundException("Hedef adisyon bulunamadi.");
+      }
+      this.ensureTicketEditable(source);
+      this.ensureTicketEditable(target);
+      if (source.branchId !== target.branchId) {
+        throw new BadRequestException("Sadece ayni subedeki adisyonlar birlestirilebilir.");
+      }
+      if (source.status === "CANCELLED") {
+        throw new BadRequestException("Kaynak adisyon zaten birlestirilmis veya iptal edilmis.");
+      }
+
+      const movedItemCount = source.items.length;
+      const movedPaymentCount = source.payments.length;
+
       await tx.ticketItem.updateMany({
         where: { ticketId: source.id },
         data: { ticketId: target.id },
       });
+      await tx.payment.updateMany({
+        where: { ticketId: source.id },
+        data: { ticketId: target.id },
+      });
+      await tx.ticketDiscount.updateMany({
+        where: { ticketId: source.id },
+        data: { ticketId: target.id },
+      });
+
       await tx.ticket.update({
         where: { id: source.id },
         data: {
@@ -877,57 +1553,219 @@ export class PosService {
           ticketName: `${source.ticketName ?? source.id} / Birlesik`,
         },
       });
+
+      if (source.tableId && source.tableId !== target.tableId) {
+        await this.releaseTableWithinTransaction(tx, source.tableId);
+      }
+
+      if (target.tableId) {
+        await tx.diningTable.update({
+          where: { id: target.tableId },
+          data: {
+            status: "OCCUPIED",
+            activeTicketId: target.id,
+          },
+        });
+      }
+
       await this.recalculateTicketTotals(tx, source.id);
-      await this.recalculateTicketTotals(tx, target.id);
+      const updatedTarget = await this.recalculateTicketTotals(tx, target.id);
+
+      const mergedPayments = await tx.payment.findMany({ where: { ticketId: target.id } });
+      const totalPaid = this.roundCurrency(mergedPayments.reduce((sum, payment) => sum + Number(payment.amount), 0));
+      const grandTotal = this.roundCurrency(Number(updatedTarget.grandTotal ?? 0));
+      if (totalPaid > 0 && totalPaid < grandTotal - 0.01) {
+        await tx.ticket.update({
+          where: { id: target.id },
+          data: { status: "PAYMENT_PENDING" },
+        });
+      }
+
+      return {
+        source,
+        target,
+        movedItemCount,
+        movedPaymentCount,
+        sourceTableId: source.tableId,
+        targetTableId: target.tableId,
+        auditBefore: {
+          sourceTicketId: source.id,
+          targetTicketId: target.id,
+          sourceItemCount: source.items.length,
+          targetItemCount: target.items.length,
+          sourcePaymentCount: source.payments.length,
+          targetPaymentCount: target.payments.length,
+          sourceStatus: source.status,
+          targetStatus: target.status,
+          sourceGrandTotal: Number(source.grandTotal),
+          targetGrandTotal: Number(target.grandTotal),
+        },
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    await this.createTicketEvent(result.target.id, "ticket_merged", {
+      sourceTicketId: dto.sourceTicketId,
+      targetTicketId: dto.targetTicketId,
+      movedItemCount: result.movedItemCount,
+      movedPaymentCount: result.movedPaymentCount,
     });
 
-    if (source.tableId && source.tableId !== target.tableId) {
-      await this.releaseTable(source.tableId);
-    }
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: result.target.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "ticket.merge",
+      entityType: "ticket",
+      entityId: result.target.id,
+      payload: {
+        sourceTicketId: dto.sourceTicketId,
+        targetTicketId: dto.targetTicketId,
+        movedItemCount: result.movedItemCount,
+        movedPaymentCount: result.movedPaymentCount,
+      },
+      oldValues: result.auditBefore,
+      newValues: {
+        sourceTicketId: dto.sourceTicketId,
+        targetTicketId: dto.targetTicketId,
+        sourceStatus: "CANCELLED",
+        targetStatus: result.target.status,
+        movedItemCount: result.movedItemCount,
+        movedPaymentCount: result.movedPaymentCount,
+      },
+      ipAddress: actor.ipAddress ?? null,
+      userAgent: actor.userAgent ?? null,
+      deviceInfo: actor.deviceInfo ?? actor.terminalId ?? null,
+    });
 
-    await this.createTicketEvent(target.id, "ticket_merged", dto);
-    await this.broadcastTicketUpdate(source.id);
-    await this.broadcastTicketUpdate(target.id);
+    if (result.sourceTableId && result.sourceTableId !== result.targetTableId) {
+      await this.broadcastTableStatus(result.sourceTableId);
+    }
+    if (result.targetTableId) {
+      await this.broadcastTableStatus(result.targetTableId);
+    }
+    await this.broadcastTicketUpdate(result.source.id);
+    await this.broadcastTicketUpdate(result.target.id);
+
     return {
-      source: await this.getTicketDetail(source.id, actor),
-      target: await this.getTicketDetail(target.id, actor),
+      source: await this.getTicketDetail(result.source.id, actor),
+      target: await this.getTicketDetail(result.target.id, actor),
     };
   }
 
   async transferTicket(ticketId: string, dto: TransferTicketDto, actor: PosActor) {
     this.ensureWaiterCanRun(actor, "Masa tasima");
-    const ticket = await this.getTicketOrThrow(ticketId, actor);
-    this.ensureTicketEditable(ticket);
     if (!dto.tableId) {
       throw new BadRequestException("Yeni masa secimi zorunlu.");
     }
-    await this.ensureTableAccess(dto.tableId, actor, ticket.branchId);
 
-    await this.prisma.ticket.update({
-      where: { id: ticketId },
-      data: { tableId: dto.tableId },
+    const result = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.ticket.findUnique({
+        where: { id: ticketId },
+        include: { table: true, items: true },
+      });
+      if (!ticket || ticket.companyId !== actor.tenantId || !actor.branchIds.includes(ticket.branchId)) {
+        throw new NotFoundException("Adisyon bulunamadi.");
+      }
+      this.ensureTicketEditable(ticket);
+
+      if (ticket.tableId === dto.tableId) {
+        throw new BadRequestException("Adisyon zaten bu masada.");
+      }
+
+      const targetTable = await tx.diningTable.findUnique({ where: { id: dto.tableId } });
+      if (!targetTable) {
+        throw new NotFoundException("Masa bulunamadi.");
+      }
+      if (targetTable.branchId !== ticket.branchId) {
+        throw new BadRequestException("Secilen masa farkli subeye ait.");
+      }
+      this.ensureBranchAccess(actor, targetTable.branchId);
+
+      if (targetTable.activeTicketId && targetTable.activeTicketId !== ticketId) {
+        throw new BadRequestException("Hedef masa baska bir adisyon tarafindan kullaniliyor.");
+      }
+      if (targetTable.status !== "AVAILABLE" && targetTable.activeTicketId !== ticketId) {
+        throw new BadRequestException("Hedef masa musait degil.");
+      }
+
+      const previousTableId = ticket.tableId;
+
+      const updatedTicket = await tx.ticket.update({
+        where: { id: ticketId },
+        data: { tableId: dto.tableId },
+      });
+
+      if (previousTableId && previousTableId !== dto.tableId) {
+        await this.releaseTableWithinTransaction(tx, previousTableId);
+      }
+
+      await tx.diningTable.update({
+        where: { id: dto.tableId },
+        data: {
+          status: "OCCUPIED",
+          activeTicketId: ticketId,
+        },
+      });
+
+      return {
+        updatedTicket,
+        previousTableId,
+        targetTableId: dto.tableId,
+        branchId: ticket.branchId,
+        auditBefore: {
+          tableId: ticket.tableId,
+          tableName: ticket.table?.name ?? null,
+          status: ticket.status,
+          itemCount: ticket.items.length,
+        },
+        auditAfter: {
+          tableId: dto.tableId,
+          tableName: targetTable.name,
+          status: updatedTicket.status,
+          itemCount: ticket.items.length,
+        },
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    await this.createTicketEvent(ticketId, "ticket_transferred", {
+      tableId: dto.tableId,
+      previousTableId: result.previousTableId ?? null,
     });
 
-    if (ticket.tableId) {
-      await this.releaseTable(ticket.tableId);
+    await this.auditLogService.create({
+      companyId: actor.tenantId,
+      branchId: result.branchId,
+      userId: actor.userId,
+      module: "pos",
+      action: "ticket.transfer",
+      entityType: "ticket",
+      entityId: ticketId,
+      payload: { tableId: dto.tableId, previousTableId: result.previousTableId ?? null },
+      oldValues: result.auditBefore,
+      newValues: result.auditAfter,
+      ipAddress: actor.ipAddress ?? null,
+      userAgent: actor.userAgent ?? null,
+      deviceInfo: actor.deviceInfo ?? actor.terminalId ?? null,
+    });
+
+    if (result.previousTableId) {
+      await this.broadcastTableStatus(result.previousTableId);
     }
-
-    await this.prisma.diningTable.update({
-      where: { id: dto.tableId },
-      data: {
-        status: "OCCUPIED",
-        activeTicketId: ticketId,
-      },
-    });
-
-    await this.createTicketEvent(ticketId, "ticket_transferred", dto);
-    await this.broadcastTableStatus(dto.tableId);
+    await this.broadcastTableStatus(result.targetTableId);
     await this.broadcastTicketUpdate(ticketId);
+
     return this.getTicketDetail(ticketId, actor);
   }
 
   async voidTicket(ticketId: string, dto: { reason?: string }, actor: PosActor) {
     this.ensureWaiterCanRun(actor, "Adisyon iptal");
+    let reason: string;
+    try {
+      reason = validateMutationReason(dto.reason);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : "Iptal gerekcesi zorunlu.");
+    }
     const ticket = await this.getTicketOrThrow(ticketId, actor);
     const voidResult = await this.prisma.$transaction(async (tx) => {
       const liveTicket = await tx.ticket.findUnique({
@@ -947,6 +1785,9 @@ export class PosService {
         data: {
           status: "VOIDED",
           closedAt: new Date(),
+          voidReason: reason,
+          billRequestedAt: null,
+          billRequestedByUserId: null,
         },
       });
 
@@ -973,7 +1814,7 @@ export class PosService {
       entityId: ticketId,
       payload: {
         stockReversal: voidResult.stockReversal,
-        reason: dto.reason ?? null,
+        reason,
       },
       oldValues: {
         status: ticket.status,
@@ -984,7 +1825,8 @@ export class PosService {
         status: voidResult.updatedTicket.status,
         grandTotal: Number(voidResult.updatedTicket.grandTotal ?? 0),
         closedAt: voidResult.updatedTicket.closedAt ?? null,
-        reason: dto.reason ?? null,
+        reason,
+        voidReason: reason,
       },
       ipAddress: actor.ipAddress ?? null,
       userAgent: actor.userAgent ?? null,
@@ -1258,18 +2100,29 @@ export class PosService {
     }
 
     try {
-      if (dto.documentType === "receipt" && dto.content?.trim()) {
-        const forcedPrinterName = process.env.POS_WINDOWS_PRINTER_NAME?.trim();
-        const targetPrinterName = forcedPrinterName || printer.name;
-        await this.sendReceiptToWindowsPrinter(targetPrinterName, dto.content);
+      const delivery = await this.deliverPrintJob(
+        job.id,
+        printer,
+        dto.content ?? "",
+        actor,
+        printer.branchId,
+        {
+          ticketId: dto.ticketId ?? "",
+          destinationCode: dto.documentType,
+          documentType: dto.documentType,
+        },
+      );
+      if (delivery.deliveryMode === "bridge") {
+        return {
+          success: true,
+          jobId: job.id,
+          printerId: printer.id,
+          documentType: dto.documentType,
+          queuedAt: new Date().toISOString(),
+          requiresLocalPrint: true,
+          status: "queued",
+        };
       }
-      this.posGateway.emitToBranch(printer.branchId, "pos.print.dispatched", {
-        printerId: printer.id,
-        printerJobId: job.id,
-        ticketId: dto.ticketId ?? null,
-        documentType: dto.documentType,
-        requestedByUserId: actor.userId,
-      });
       await this.prisma.printerJob.update({
         where: { id: job.id },
         data: {
@@ -1277,6 +2130,13 @@ export class PosService {
           completedAt: new Date(),
         },
       });
+      return {
+        success: true,
+        jobId: job.id,
+        printerId: printer.id,
+        documentType: dto.documentType,
+        queuedAt: new Date().toISOString(),
+      };
     } catch (error) {
       await this.prisma.printerJob.update({
         where: { id: job.id },
@@ -1292,14 +2152,6 @@ export class PosService {
       });
       throw new BadRequestException("Yazdirma komutu gonderilemedi.");
     }
-
-    return {
-      success: true,
-      jobId: job.id,
-      printerId: printer.id,
-      documentType: dto.documentType,
-      queuedAt: new Date().toISOString(),
-    };
   }
 
   private async sendReceiptToWindowsPrinter(printerName: string, content: string) {
@@ -1435,9 +2287,19 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
 
   async testPrinter(dto: PrinterDispatchDto, actor: PosActor) {
     this.ensureWaiterCanRun(actor, "Yazici test islemi");
+    const printer = await this.ensurePrinterAccess(dto.printerId, actor);
+    const branch = await this.prisma.branch.findUnique({ where: { id: printer.branchId } });
+    const destination = printer.printDestinationId
+      ? await this.prisma.printDestination.findUnique({ where: { id: printer.printDestinationId } })
+      : null;
     const content =
       dto.content?.trim() ||
-      `TEST CIKTISI\nTarih: ${new Date().toLocaleString("tr-TR")}\nTerminal: ${actor.terminalId ?? "-"}\nKullanici: ${actor.userId}`;
+      buildPrinterTestContent({
+        slipName: printer.displayName ?? destination?.name ?? "Test Fisi",
+        printerName: printer.name,
+        branchName: branch?.name,
+        destinationName: destination?.name,
+      });
     return this.dispatchPrinter(
       {
         ...dto,
@@ -1446,6 +2308,327 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
       },
       actor,
     );
+  }
+
+  async testPrinterConnection(dto: PrinterConnectionTestDto, actor: PosActor) {
+    this.ensureWaiterCanRun(actor, "Yazici baglanti testi");
+    const branchId = dto.branchId ?? actor.branchIds[0];
+    if (!branchId) {
+      throw new BadRequestException("Sube bilgisi gerekli.");
+    }
+    this.ensureBranchAccess(actor, branchId);
+    const bridgeResult = await this.probeLocalPrintBridge(dto.printerName);
+    return {
+      printerName: dto.printerName,
+      branchId,
+      ...bridgeResult,
+    };
+  }
+
+  async dispatchTicketPrintRouting(ticketId: string, dto: TicketPrintDispatchDto, actor: PosActor) {
+    if (dto.trigger === "receipt") {
+      this.ensureWaiterCanRun(actor, "Kasa fisi yazdirma");
+    }
+    const ticket = await this.getTicketOrThrow(ticketId, actor);
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: ticket.branchId },
+      include: { company: true },
+    });
+    const routingContext = await this.printRoutingService.loadBranchRoutingContext(ticket.branchId, actor.tenantId);
+    const items = (ticket.items ?? []).map((item) => ({
+      id: item.id,
+      productId: String(item.productId ?? ""),
+      productName: item.productName,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+      lineTotal: Number(item.lineTotal),
+      discountTotal: Number(item.discountTotal),
+      notes: item.notes,
+      modifiersJson: (item.modifiersJson as Record<string, unknown> | null) ?? null,
+    }));
+    const plan = this.printRoutingService.buildPlan({
+      trigger: dto.trigger,
+      items,
+      ...routingContext,
+    });
+    if (!plan.groups.length) {
+      throw new BadRequestException("Yazdirilacak fis bulunamadi.");
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const group of plan.groups) {
+      const idempotencyKey = this.printRoutingService.buildIdempotencyKey({
+        ticketId,
+        destinationCode: group.destination.code,
+        trigger: dto.trigger,
+        printBatchId: dto.printBatchId,
+      });
+      const existing = await this.prisma.printerJob.findUnique({ where: { idempotencyKey } });
+      if (existing && shouldSkipDuplicatePrint(existing.status)) {
+        results.push({
+          destinationCode: group.destination.code,
+          destinationName: group.destination.name,
+          jobId: existing.id,
+          status: existing.status,
+          skipped: true,
+        });
+        continue;
+      }
+
+      const printerMatch = await this.printRoutingService.findPrinterForDestination(ticket.branchId, group.destination.code);
+      if (!printerMatch) {
+        const failedJob = await this.prisma.printerJob.create({
+          data: {
+            companyId: actor.tenantId,
+            branchId: ticket.branchId,
+            ticketId,
+            printDestinationId: null,
+            destinationCode: group.destination.code,
+            idempotencyKey,
+            jobType: dto.trigger === "receipt" ? "receipt" : "kitchen",
+            payload: {
+              reason: "printer_not_configured",
+              destinationCode: group.destination.code,
+              requestedByUserId: actor.userId,
+            },
+            status: "failed",
+            requestedByUserId: actor.userId,
+            completedAt: new Date(),
+          },
+        });
+        results.push({
+          destinationCode: group.destination.code,
+          destinationName: group.destination.name,
+          jobId: failedJob.id,
+          status: "failed",
+          error: "Bu fislik icin yazici tanimi bulunamadi.",
+        });
+        continue;
+      }
+
+      const content = buildSlipContent(
+        group.items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          lineTotal: item.lineTotal,
+          notes: item.notes,
+        })),
+        {
+          businessName: branch?.company?.name ?? "ADISYON SISTEMI",
+          branchName: branch?.name ?? "-",
+          tableLabel: ticket.table?.name ?? "-",
+          ticketLabel: ticket.ticketName ?? ticket.id,
+          destinationName: group.destination.name,
+          destinationCode: group.destination.code,
+          printerName: printerMatch.printer.name,
+          openedAt: ticket.openedAt,
+          closedAt: ticket.closedAt,
+          isCashRegister: group.destination.isCashRegister,
+          subtotal: Number(ticket.subtotal),
+          discountTotal: Number(ticket.discountTotal),
+          taxTotal: Number(ticket.taxTotal),
+          grandTotal: Number(ticket.grandTotal),
+          payments: (ticket.payments ?? []).map((payment) => ({
+            method: String(payment.method),
+            amount: Number(payment.amount),
+          })),
+        },
+      );
+
+      const job = await this.prisma.printerJob.create({
+        data: {
+          companyId: actor.tenantId,
+          branchId: ticket.branchId,
+          printerId: printerMatch.printer.id,
+          ticketId,
+          printDestinationId: printerMatch.destination.id,
+          destinationCode: group.destination.code,
+          idempotencyKey,
+          jobType: dto.trigger === "receipt" ? "receipt" : "kitchen",
+          payload: {
+            content,
+            destinationCode: group.destination.code,
+            printBatchId: dto.printBatchId,
+            requestedByUserId: actor.userId,
+          },
+          status: "queued",
+          requestedByUserId: actor.userId,
+        },
+      });
+
+      try {
+        const delivery = await this.deliverPrintJob(job.id, printerMatch.printer, content, actor, ticket.branchId, {
+          ticketId,
+          destinationCode: group.destination.code,
+          documentType: dto.trigger === "receipt" ? "receipt" : "kitchen",
+        });
+        results.push({
+          destinationCode: group.destination.code,
+          destinationName: group.destination.name,
+          jobId: job.id,
+          printerId: printerMatch.printer.id,
+          printerName: printerMatch.printer.name,
+          content: delivery.requiresLocalPrint ? content : undefined,
+          ...delivery,
+        });
+      } catch (error) {
+        await this.prisma.printerJob.update({
+          where: { id: job.id },
+          data: {
+            status: "failed",
+            completedAt: new Date(),
+            payload: {
+              content,
+              destinationCode: group.destination.code,
+              printBatchId: dto.printBatchId,
+              requestedByUserId: actor.userId,
+              error: error instanceof Error ? error.message : "print_failed",
+            } as Prisma.InputJsonValue,
+          },
+        });
+        results.push({
+          destinationCode: group.destination.code,
+          destinationName: group.destination.name,
+          jobId: job.id,
+          status: "failed",
+          error: error instanceof Error ? error.message : "print_failed",
+        });
+      }
+    }
+
+    return {
+      ticketId,
+      trigger: dto.trigger,
+      printBatchId: dto.printBatchId,
+      results,
+    };
+  }
+
+  async acknowledgePrintJob(jobId: string, dto: PrinterBridgeAckDto, actor: PosActor) {
+    const job = await this.prisma.printerJob.findUnique({ where: { id: jobId } });
+    if (!job || job.companyId !== actor.tenantId || !actor.branchIds.includes(job.branchId)) {
+      throw new NotFoundException("Yazdirma isi bulunamadi.");
+    }
+    await this.prisma.printerJob.update({
+      where: { id: jobId },
+      data: {
+        status: dto.status,
+        completedAt: new Date(),
+        payload: {
+          ...(typeof job.payload === "object" && job.payload ? (job.payload as Record<string, unknown>) : {}),
+          bridgeAckByUserId: actor.userId,
+          error: dto.error ?? null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return { success: dto.status === "sent", jobId, status: dto.status };
+  }
+
+  private async deliverPrintJob(
+    jobId: string,
+    printer: { id: string; name: string; connectionUri: string },
+    content: string,
+    actor: PosActor,
+    branchId: string,
+    meta: { ticketId: string; destinationCode: string; documentType: string },
+  ) {
+    const uri = String(printer.connectionUri ?? "").trim().toLowerCase();
+    if (uri.startsWith("bridge://")) {
+      this.posGateway.emitToBranch(branchId, "pos.print.job.ready", {
+        jobId,
+        printerId: printer.id,
+        printerName: printer.name,
+        ticketId: meta.ticketId,
+        destinationCode: meta.destinationCode,
+        documentType: meta.documentType,
+        content,
+        requestedByUserId: actor.userId,
+      });
+      return { status: "queued", deliveryMode: "bridge", requiresLocalPrint: true };
+    }
+
+    if (uri.startsWith("tcp://")) {
+      await this.sendToNetworkPrinter(uri, content);
+      await this.prisma.printerJob.update({
+        where: { id: jobId },
+        data: { status: "sent", completedAt: new Date() },
+      });
+      this.posGateway.emitToBranch(branchId, "pos.print.dispatched", {
+        printerId: printer.id,
+        printerJobId: jobId,
+        ticketId: meta.ticketId,
+        documentType: meta.documentType,
+        destinationCode: meta.destinationCode,
+        requestedByUserId: actor.userId,
+      });
+      return { status: "sent", deliveryMode: "network" };
+    }
+
+    if (process.platform === "win32") {
+      const forcedPrinterName = process.env.POS_WINDOWS_PRINTER_NAME?.trim();
+      await this.sendReceiptToWindowsPrinter(forcedPrinterName || printer.name, content);
+      await this.prisma.printerJob.update({
+        where: { id: jobId },
+        data: { status: "sent", completedAt: new Date() },
+      });
+      this.posGateway.emitToBranch(branchId, "pos.print.dispatched", {
+        printerId: printer.id,
+        printerJobId: jobId,
+        ticketId: meta.ticketId,
+        documentType: meta.documentType,
+        destinationCode: meta.destinationCode,
+        requestedByUserId: actor.userId,
+      });
+      return { status: "sent", deliveryMode: "server-windows" };
+    }
+
+    throw new BadRequestException("Yazici erisimi unavailable. Local print bridge gerekli.");
+  }
+
+  private async probeLocalPrintBridge(printerName: string) {
+    const bridgeUrl = process.env.POS_PRINT_BRIDGE_URL ?? "http://127.0.0.1:9247";
+    try {
+      const response = await fetch(`${bridgeUrl}/printers/${encodeURIComponent(printerName)}/status`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${process.env.POS_PRINT_BRIDGE_TOKEN ?? "dev-bridge-token"}`,
+        },
+      });
+      if (!response.ok) {
+        return { reachable: false, printerFound: false, status: "unavailable" as const };
+      }
+      const payload = (await response.json()) as { found?: boolean; status?: string };
+      return {
+        reachable: true,
+        printerFound: Boolean(payload.found),
+        status: (payload.status ?? (payload.found ? "online" : "offline")) as "online" | "offline" | "unknown" | "unavailable",
+      };
+    } catch {
+      return { reachable: false, printerFound: false, status: "unknown" as const };
+    }
+  }
+
+  private async sendToNetworkPrinter(connectionUri: string, content: string) {
+    const parsed = new URL(connectionUri);
+    const host = parsed.hostname;
+    const port = Number(parsed.port || 9100);
+    if (!host) {
+      throw new BadRequestException("Gecersiz yazici baglanti adresi.");
+    }
+    await new Promise<void>((resolve, reject) => {
+      const socket = createConnection({ host, port }, () => {
+        socket.write(`${content.replace(/\r?\n/g, "\r\n")}\r\n\r\n\f`, "ascii", (error) => {
+          socket.end();
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      socket.setTimeout(5000, () => {
+        socket.destroy();
+        reject(new BadRequestException("Ag yazicisina baglanilamadi."));
+      });
+      socket.on("error", (error) => reject(error));
+    });
   }
 
   async openDrawer(dto: DrawerOpenDto, actor: PosActor) {
@@ -1475,20 +2658,191 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
       include: {
         customer: true,
         table: true,
-        items: true,
+        items: {
+          include: {
+            addedByUser: { select: { id: true, fullName: true } },
+          },
+        },
         payments: true,
       },
     });
     if (!ticket || ticket.companyId !== actor.tenantId || !actor.branchIds.includes(ticket.branchId)) {
       throw new NotFoundException("Adisyon bulunamadi.");
     }
-    return ticket;
+    const discounts = await this.prisma.ticketDiscount.findMany({ where: { ticketId } });
+    return { ...ticket, discounts };
   }
 
   private ensureTicketEditable(ticket: { status: string }) {
     if (["PAID", "CANCELLED", "VOIDED"].includes(ticket.status)) {
       throw new BadRequestException("Kapali adisyon uzerinde islem yapilamaz.");
     }
+  }
+
+  private ensureTicketSplittable(ticket: { status: string; payments?: Array<{ amount: unknown }> }) {
+    this.ensureTicketEditable(ticket);
+    const paidTotal = this.roundCurrency((ticket.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount), 0));
+    if (paidTotal > 0) {
+      throw new BadRequestException("Odeme alinmis adisyon bolunemez.");
+    }
+  }
+
+  private async executeSplitToTarget(
+    tx: Prisma.TransactionClient,
+    input: {
+      source: {
+        id: string;
+        companyId: string;
+        branchId: string;
+        customerId: string | null;
+        tableId: string | null;
+        coverCount: number;
+        ticketName: string | null;
+        channel: string;
+        splitGroupId?: string | null;
+      };
+      lines: SplitLineInput[];
+      actor: PosActor;
+      splitGroupId: string;
+      ticketName: string;
+      targetChannel: string;
+      splitMethod: string;
+      personLabel?: string;
+    },
+  ) {
+    const sourceItems = await tx.ticketItem.findMany({ where: { ticketId: input.source.id } });
+    const itemMap = new Map(sourceItems.map((item) => [item.id, item]));
+
+    if (!input.source.splitGroupId) {
+      await tx.ticket.update({
+        where: { id: input.source.id },
+        data: { splitGroupId: input.splitGroupId },
+      });
+    }
+
+    const target = await tx.ticket.create({
+      data: {
+        companyId: input.source.companyId,
+        branchId: input.source.branchId,
+        customerId: input.source.customerId,
+        tableId: input.source.tableId,
+        channel: input.targetChannel as any,
+        ticketName: input.ticketName,
+        coverCount: 1,
+        status: "OPEN",
+        parentTicketId: input.source.id,
+        splitGroupId: input.splitGroupId,
+        personLabel: input.personLabel ?? null,
+      },
+    });
+
+    const requestedByItem = new Map<string, number>();
+    for (const line of input.lines) {
+      requestedByItem.set(line.itemId, (requestedByItem.get(line.itemId) ?? 0) + line.quantity);
+    }
+
+    for (const [itemId, requestedQty] of requestedByItem.entries()) {
+      const item = itemMap.get(itemId);
+      if (!item) {
+        throw new NotFoundException("Bolunecek satir bulunamadi.");
+      }
+
+      const availableQty = Number(item.quantity);
+      if (requestedQty > this.roundCurrency(availableQty) + 0.0001) {
+        throw new BadRequestException("Bolunecek miktar mevcut miktardan buyuk olamaz.");
+      }
+
+      const snapshot = {
+        id: item.id,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        discountTotal: Number(item.discountTotal),
+        taxTotal: Number(item.taxTotal),
+        lineTotal: Number(item.lineTotal),
+      };
+      const parts = computeSplitLineParts(snapshot, requestedQty);
+
+      const newItem = await tx.ticketItem.create({
+        data: {
+          ticketId: target.id,
+          productId: item.productId,
+          productName: item.productName,
+          quantity: parts.quantity,
+          unitPrice: parts.unitPrice,
+          discountTotal: parts.discountTotal,
+          taxTotal: parts.taxTotal,
+          lineTotal: parts.lineTotal,
+          notes: item.notes,
+          modifiersJson: (item.modifiersJson ?? undefined) as any,
+          addedByUserId: item.addedByUserId,
+        },
+      });
+
+      const itemDiscounts = await tx.ticketDiscount.findMany({
+        where: { ticketId: input.source.id, ticketItemId: item.id },
+      });
+      for (const discount of itemDiscounts) {
+        const ratio = requestedQty / Number(item.quantity);
+        const movedAmount = this.roundCurrency(Number(discount.amount) * ratio);
+        if (movedAmount <= 0) continue;
+        await tx.ticketDiscount.create({
+          data: {
+            companyId: input.source.companyId,
+            branchId: input.source.branchId,
+            ticketId: target.id,
+            ticketItemId: newItem.id,
+            discountType: discount.discountType,
+            label: discount.label,
+            amount: movedAmount,
+            approvalRequired: discount.approvalRequired,
+            approvedByUserId: discount.approvedByUserId,
+          },
+        });
+        const remainingDiscount = this.roundCurrency(Number(discount.amount) - movedAmount);
+        if (remainingDiscount <= 0) {
+          await tx.ticketDiscount.delete({ where: { id: discount.id } });
+        } else {
+          await tx.ticketDiscount.update({
+            where: { id: discount.id },
+            data: { amount: remainingDiscount },
+          });
+        }
+      }
+
+      if (parts.remainingQty <= 0) {
+        await tx.ticketItem.delete({ where: { id: item.id } });
+      } else {
+        await tx.ticketItem.update({
+          where: { id: item.id },
+          data: {
+            quantity: parts.remainingQty,
+            discountTotal: parts.remainingDiscount,
+            taxTotal: parts.remainingTax,
+            lineTotal: parts.remainingLineTotal,
+          },
+        });
+      }
+    }
+
+    await this.recalculateTicketTotals(tx, input.source.id);
+    const updatedTarget = await this.recalculateTicketTotals(tx, target.id);
+
+    await tx.ticketSplit.create({
+      data: {
+        companyId: input.source.companyId,
+        branchId: input.source.branchId,
+        sourceTicketId: input.source.id,
+        targetTicketId: target.id,
+        splitMethod: input.splitMethod,
+        createdByUserId: input.actor.userId,
+        payload: {
+          lines: input.lines,
+          personLabel: input.personLabel ?? null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    return { target: updatedTarget };
   }
 
   private ensureWaiterCanRun(actor: PosActor, operation: string) {
@@ -1504,6 +2858,19 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
 
   private roundCurrency(value: number) {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private async runSerializableTransaction<T>(handler: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.prisma.$transaction(handler, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2034" || error.code === "P2028")) {
+        throw new BadRequestException("Es zamanli islem nedeniyle bolme tekrar denenmeli.");
+      }
+      throw error;
+    }
   }
 
   private ensureBranchAccess(actor: PosActor, branchId: string) {
@@ -1599,7 +2966,7 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
   private async recalculateTicketTotals(tx: any, ticketId: string) {
     const [items, ticketDiscounts] = await Promise.all([
       tx.ticketItem.findMany({ where: { ticketId } }),
-      tx.ticketDiscount.findMany({ where: { ticketId } }),
+      tx.ticketDiscount.findMany({ where: { ticketId, status: "applied" } }),
     ]);
 
     const discountMap = new Map<string, number>();
@@ -1696,21 +3063,32 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
       include: {
         customer: true,
         table: true,
-        items: true,
+        items: {
+          include: {
+            addedByUser: { select: { id: true, fullName: true } },
+          },
+        },
         payments: true,
       },
     });
     if (!ticket) return;
 
+    const serialized = this.serializeTicket(ticket);
     const payload = {
       ticketId,
       status: ticket.status,
-      items: ticket.items.map((item) => this.serializeTicketItem(item)),
+      coverCount: ticket.coverCount,
+      openedAt: ticket.openedAt?.toISOString?.() ?? ticket.openedAt,
+      billRequestedAt: ticket.billRequestedAt?.toISOString?.() ?? ticket.billRequestedAt ?? null,
+      ticketName: ticket.ticketName,
+      items: serialized.items,
       totals: {
         subtotal: Number(ticket.subtotal),
         discountTotal: Number(ticket.discountTotal),
         taxTotal: Number(ticket.taxTotal),
         grandTotal: Number(ticket.grandTotal),
+        paidTotal: serialized.paidTotal,
+        remainingAmount: serialized.remainingAmount,
       },
       tableId: ticket.tableId,
     };
@@ -1737,13 +3115,20 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
       customerId: ticket.customerId,
       customerName: ticket.customer?.businessName ?? ticket.customer?.fullName ?? null,
       customerPhone: ticket.customer?.phone ?? null,
+      parentTicketId: ticket.parentTicketId ?? null,
+      splitGroupId: ticket.splitGroupId ?? null,
+      personLabel: ticket.personLabel ?? null,
       subtotal: Number(ticket.subtotal),
       discountTotal: Number(ticket.discountTotal),
       taxTotal: Number(ticket.taxTotal),
       grandTotal: Number(ticket.grandTotal),
-      paidTotal: totalPaid,
-      remainingAmount: Math.max(Number(ticket.grandTotal) - totalPaid, 0),
+      paidTotal: this.roundCurrency(totalPaid),
+      remainingAmount: this.roundCurrency(Math.max(Number(ticket.grandTotal) - totalPaid, 0)),
+      voidReason: ticket.voidReason ?? null,
+      billRequestedAt: ticket.billRequestedAt?.toISOString?.() ?? ticket.billRequestedAt ?? null,
+      billRequestedByUserId: ticket.billRequestedByUserId ?? null,
       items: (ticket.items ?? []).map((item: any) => this.serializeTicketItem(item)),
+      discounts: (ticket.discounts ?? []).map((discount: any) => this.serializeTicketDiscount(discount)),
       payments: (ticket.payments ?? []).map((payment: any) => ({
         id: payment.id,
         method: payment.method,
@@ -1752,6 +3137,7 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
         referenceNumber: payment.referenceNumber,
         paidAt: payment.paidAt?.toISOString?.() ?? payment.paidAt,
       })),
+      splitAccounts: ticket.splitAccounts ?? undefined,
     };
   }
 
@@ -1767,6 +3153,26 @@ if (-not [RawPrinterHelper]::SendBytesToPrinter($PrinterName, $all)) {
       lineTotal: Number(item.lineTotal),
       notes: item.notes,
       modifiersJson: item.modifiersJson,
+      addedByUserId: item.addedByUserId ?? null,
+      addedByName: item.addedByUser?.fullName ?? null,
+    };
+  }
+
+  private serializeTicketDiscount(discount: any) {
+    return {
+      id: discount.id,
+      ticketItemId: discount.ticketItemId,
+      discountType: discount.discountType,
+      discountKind: discount.discountKind ?? "DISCOUNT",
+      label: discount.label,
+      amount: Number(discount.amount),
+      originalAmount: discount.originalAmount ? Number(discount.originalAmount) : null,
+      percentage: discount.percentage ? Number(discount.percentage) : null,
+      reason: discount.reason ?? null,
+      status: discount.status ?? "applied",
+      approvalRequired: Boolean(discount.approvalRequired),
+      approvalRequestId: discount.approvalRequestId ?? null,
+      createdAt: discount.createdAt?.toISOString?.() ?? discount.createdAt,
     };
   }
 }

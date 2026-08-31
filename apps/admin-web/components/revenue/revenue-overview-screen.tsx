@@ -7,6 +7,7 @@ import { exportRevenueOverview, fetchRevenueOverview } from "../../lib/services/
 import { formatTryCurrency } from "../../lib/utils/admin-format";
 import { downloadCsv } from "../../lib/utils/download";
 import { RevenueFilterForm } from "./revenue-filter-form";
+import { AdminButton, AdminChartCard, AdminField, AdminInput, AdminPageHeader, AdminPagination, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap, resolveBadgeTone } from "../ui/admin-ui";
 
 export function RevenueOverviewScreen() {
   const searchParams = useSearchParams();
@@ -69,48 +70,41 @@ export function RevenueOverviewScreen() {
   }, [filteredRows, limit, page, totalPages]);
 
   if (loading) {
-    return <div className="admin-surface admin-empty-state">Ciro ekrani yukleniyor...</div>;
+    return <AdminStateCard message="Ciro ekranı yükleniyor..." tone="info" />;
   }
 
   if (error || !data) {
-    return <div className="admin-surface admin-empty-state">{error ?? "Ciro verisi bulunamadi."}</div>;
+    return <AdminStateCard message={error ?? "Ciro verisi bulunamadı."} tone="danger" />;
   }
 
   return (
-    <div className="dashboard-stack admin-reference-page admin-revenue-page">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Aldal Pos / Ciro Modulu</p>
-          <h3>Genel ciro, tarih filtreleme ve performans karsilastirmalari</h3>
-        </div>
-        <button className="admin-outline-button" type="button" onClick={handleExport}>
-          Ciro Export
-        </button>
-      </section>
+    <div className="admin-page-stack admin-revenue-page">
+      <AdminPageHeader
+        kicker="Ciro"
+        title="Genel Ciro"
+        description="Genel ciro, filtreleme ve dönem bazlı karşılaştırmalar."
+        actions={
+          <AdminButton variant="outline" onClick={handleExport}>
+            Ciro Export
+          </AdminButton>
+        }
+      />
 
       <RevenueFilterForm branchOptions={data.branchOptions} />
 
-      <section className="dashboard-grid dashboard-grid--stats">
+      <AdminStatsGrid>
         {data.cards.map((card) => (
-          <article key={card.key} className="admin-surface admin-stat-card">
-            <div className="admin-stat-card__header">
-              <span className="admin-kicker">{card.label}</span>
-              <span className={`admin-status-pill admin-status-pill--${card.tone}`}>{card.helper}</span>
-            </div>
-            <strong className="admin-stat-card__value">{card.key === "ticketCount" ? card.value : formatTryCurrency(card.value)}</strong>
-          </article>
+          <AdminStatCard
+            key={card.key}
+            label={card.label}
+            value={card.key === "ticketCount" ? card.value : formatTryCurrency(card.value)}
+            badge={<AdminStatusBadge tone={resolveBadgeTone(card.tone)}>{card.helper}</AdminStatusBadge>}
+          />
         ))}
-      </section>
+      </AdminStatsGrid>
 
       <section className="dashboard-grid dashboard-grid--hero">
-        <article className="admin-surface admin-chart-card">
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">Grafik</p>
-              <h3>Ciro Trendi</h3>
-            </div>
-            <span className="admin-status-pill admin-status-pill--info">{data.chart.groupBy}</span>
-          </div>
+        <AdminChartCard kicker="Grafik" title="Ciro Trendi" badge={<AdminStatusBadge tone="info">{data.chart.groupBy}</AdminStatusBadge>}>
           <div className="admin-chart-live">
             {data.chart.points.map((point) => (
               <div key={point.label} className="admin-chart-live__item">
@@ -125,15 +119,9 @@ export function RevenueOverviewScreen() {
               </div>
             ))}
           </div>
-        </article>
+        </AdminChartCard>
 
-        <article className="admin-surface">
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">Odeme Dagilimi</p>
-              <h3>Yontem Bazli Ciro</h3>
-            </div>
-          </div>
+        <AdminTableCard kicker="Ödeme Dağılımı" title="Yöntem Bazlı Ciro">
           <ul className="admin-list">
             {data.paymentBreakdown.map((payment) => (
               <li key={payment.method}>
@@ -142,32 +130,35 @@ export function RevenueOverviewScreen() {
               </li>
             ))}
           </ul>
-        </article>
+        </AdminTableCard>
       </section>
 
-      <section className="admin-surface">
-        <div className="admin-section-head">
-          <div>
-            <p className="admin-kicker">Tablo</p>
-            <h3>Gun / Hafta / Ay Bazli Ciro Tablosu</h3>
-          </div>
-          <span className="admin-status-pill admin-status-pill--success">{filteredRows.length} satir</span>
-        </div>
+      <AdminTableCard
+        kicker="Tablo"
+        title="Dönem Bazlı Ciro Tablosu"
+        badge={<AdminStatusBadge tone="success">{filteredRows.length} satır</AdminStatusBadge>}
+        footer={
+          <AdminPagination
+            page={Math.min(page, totalPages)}
+            totalPages={totalPages}
+            onPrev={() => setPage((current) => Math.max(1, current - 1))}
+            onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+          />
+        }
+      >
         <div className="admin-form-grid">
-          <label className="admin-field">
-            <span>Tabloda Ara</span>
-            <input
+          <AdminField label="Tabloda Ara">
+            <AdminInput
               value={tableSearch}
-              placeholder="Donem etiketi ara..."
+              placeholder="Dönem etiketi ara..."
               onChange={(event) => {
                 setTableSearch(event.target.value);
                 setPage(1);
               }}
             />
-          </label>
-          <label className="admin-field">
-            <span>Sayfa Boyutu</span>
-            <select
+          </AdminField>
+          <AdminField label="Sayfa Boyutu">
+            <AdminSelect
               value={String(limit)}
               onChange={(event) => {
                 setLimit(Number(event.target.value));
@@ -177,14 +168,14 @@ export function RevenueOverviewScreen() {
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
-            </select>
-          </label>
+            </AdminSelect>
+          </AdminField>
         </div>
-        <div className="admin-table-wrap">
+        <AdminTableWrap>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Donem</th>
+                <th>Dönem</th>
                 <th>Ciro</th>
                 <th>Adisyon</th>
                 <th>Ort. Sepet</th>
@@ -201,19 +192,8 @@ export function RevenueOverviewScreen() {
               ))}
             </tbody>
           </table>
-        </div>
-        <div className="admin-filter-actions">
-          <button className="admin-outline-button" type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
-            Onceki
-          </button>
-          <span className="admin-status-pill admin-status-pill--info">
-            Sayfa {Math.min(page, totalPages)} / {totalPages}
-          </span>
-          <button className="admin-outline-button" type="button" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
-            Sonraki
-          </button>
-        </div>
-      </section>
+        </AdminTableWrap>
+      </AdminTableCard>
     </div>
   );
 }

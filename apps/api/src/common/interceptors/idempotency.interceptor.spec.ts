@@ -1,7 +1,8 @@
 import type { CallHandler, ExecutionContext } from "@nestjs/common";
 import { of, throwError as rxThrowError } from "rxjs";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdempotencyInterceptor } from "./idempotency.interceptor";
+import type { IdempotencyStoreService } from "../idempotency/idempotency-store.service";
 
 function createContext(request: Record<string, unknown>): ExecutionContext {
   return {
@@ -12,13 +13,31 @@ function createContext(request: Record<string, unknown>): ExecutionContext {
 }
 
 describe("IdempotencyInterceptor", () => {
+  let store: IdempotencyStoreService;
+
+  beforeEach(() => {
+    store = {
+      acquire: vi.fn(),
+      complete: vi.fn(),
+      release: vi.fn(),
+      lookup: vi.fn(),
+      processingConflict: vi.fn(() => new Error("processing")),
+    } as unknown as IdempotencyStoreService;
+  });
+
   it("hata alan istekte processing kaydini temizler", async () => {
-    const interceptor = new IdempotencyInterceptor();
+    const interceptor = new IdempotencyInterceptor(store);
     const request = {
       method: "POST",
       url: "/pos/payments",
       idempotencyKey: "same-key",
     };
+
+    vi.mocked(store.acquire)
+      .mockResolvedValueOnce({ kind: "acquired" })
+      .mockResolvedValueOnce({ kind: "acquired" });
+    vi.mocked(store.release).mockResolvedValue(undefined);
+    vi.mocked(store.complete).mockResolvedValue(undefined);
 
     const firstResult = await new Promise<unknown>((resolve) => {
       interceptor
@@ -44,10 +63,11 @@ describe("IdempotencyInterceptor", () => {
 
     expect(firstResult).toBeInstanceOf(Error);
     expect(secondResult).toEqual({ ok: true });
+    expect(store.release).toHaveBeenCalled();
   });
 
   it("cache anahtarini method ve url ile scope eder", async () => {
-    const interceptor = new IdempotencyInterceptor();
+    const interceptor = new IdempotencyInterceptor(store);
     const postRequest = {
       method: "POST",
       url: "/pos/payments",
@@ -58,6 +78,9 @@ describe("IdempotencyInterceptor", () => {
       url: "/pos/refunds",
       idempotencyKey: "shared-key",
     };
+
+    vi.mocked(store.acquire).mockResolvedValue({ kind: "acquired" });
+    vi.mocked(store.complete).mockResolvedValue(undefined);
 
     await new Promise<void>((resolve, reject) => {
       interceptor
@@ -83,5 +106,6 @@ describe("IdempotencyInterceptor", () => {
     });
 
     expect(refundResult).toEqual({ action: "refund" });
+    expect(store.acquire).toHaveBeenCalledTimes(2);
   });
 });

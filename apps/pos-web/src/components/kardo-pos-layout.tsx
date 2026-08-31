@@ -4,16 +4,20 @@ export function PosTopbar({
   caption,
   search,
   onSearchChange,
+  modeLabel,
+  userLabel,
 }: {
   caption: string;
   search: string;
   onSearchChange: (value: string) => void;
+  modeLabel?: string;
+  userLabel?: string;
 }) {
   return (
     <header className="pos-topbar">
       <div className="pos-topbar__brand">
         <strong className="pos-topbar__logo">Aldal Pos</strong>
-        <span className="pos-topbar__meta">Satış</span>
+        <span className="pos-topbar__meta">{modeLabel ?? "Satis"}</span>
       </div>
       <div className="pos-topbar__tools">
         <div className="pos-search">
@@ -21,7 +25,8 @@ export function PosTopbar({
           <input aria-label="Urun arama" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Ürün ara" />
         </div>
         <div className="pos-session">
-          <span className="pos-user-chip">{caption}</span>
+          {modeLabel ? <span className="pos-mode-chip">{modeLabel}</span> : null}
+          <span className="pos-user-chip">{userLabel ?? caption}</span>
         </div>
       </div>
     </header>

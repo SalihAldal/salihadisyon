@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AdminFilterPanel } from "../ui/admin-ui";
+import { AdminButton, AdminField, AdminFilterPanel, AdminInput, AdminSelect } from "../ui/admin-ui";
 
 interface ReportFilterFormProps {
   branchOptions: Array<{ id: string; name: string }>;
@@ -124,101 +124,91 @@ export function ReportFilterForm({ branchOptions }: ReportFilterFormProps) {
       className="admin-reference-filters"
       actions={
         <>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("today")}>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("today")}>
             Bugun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("last7")}>
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("last7")}>
             Son 7 Gun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("last30")}>
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("last30")}>
             Son 30 Gun
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("thisMonth")}>
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("thisMonth")}>
             Bu Ay
-          </button>
-          <button className="admin-outline-button" type="button" onClick={() => handleQuickPreset("thisYear")}>
+          </AdminButton>
+          <AdminButton variant="outline" onClick={() => handleQuickPreset("thisYear")}>
             Bu Yil
-          </button>
+          </AdminButton>
         </>
       }
     >
       <div className="admin-form-grid">
-        <label className="admin-field">
-          <span>Sube</span>
-          <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+        <AdminField label="Sube">
+          <AdminSelect value={branchId} onChange={(event) => setBranchId(event.target.value)}>
             <option value="">Tum subeler</option>
             {branchOptions.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name}
               </option>
             ))}
-          </select>
-        </label>
+          </AdminSelect>
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Baslangic</span>
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-        </label>
+        <AdminField label="Baslangic">
+          <AdminInput type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Bitis</span>
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-        </label>
+        <AdminField label="Bitis">
+          <AdminInput type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Karsi Baslangic</span>
-          <input type="date" value={compareFrom} onChange={(event) => setCompareFrom(event.target.value)} />
-        </label>
+        <AdminField label="Karsi Baslangic">
+          <AdminInput type="date" value={compareFrom} onChange={(event) => setCompareFrom(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Karsi Bitis</span>
-          <input type="date" value={compareTo} onChange={(event) => setCompareTo(event.target.value)} />
-        </label>
+        <AdminField label="Karsi Bitis">
+          <AdminInput type="date" value={compareTo} onChange={(event) => setCompareTo(event.target.value)} />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Grup</span>
-          <select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
+        <AdminField label="Grup">
+          <AdminSelect value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
             <option value="day">Gun</option>
             <option value="week">Hafta</option>
             <option value="month">Ay</option>
             <option value="year">Yil</option>
-          </select>
-        </label>
+          </AdminSelect>
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Ara</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Sube, urun, personel..." />
-        </label>
+        <AdminField label="Ara">
+          <AdminInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Sube, urun, personel..." />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Siralama</span>
-          <input value={sortBy} onChange={(event) => setSortBy(event.target.value)} placeholder="revenue / quantity / margin / variance" />
-        </label>
+        <AdminField label="Siralama">
+          <AdminInput value={sortBy} onChange={(event) => setSortBy(event.target.value)} placeholder="revenue / quantity / margin / variance" />
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Yon</span>
-          <select value={sortDirection} onChange={(event) => setSortDirection(event.target.value)}>
+        <AdminField label="Yon">
+          <AdminSelect value={sortDirection} onChange={(event) => setSortDirection(event.target.value)}>
             <option value="desc">Azalan</option>
             <option value="asc">Artan</option>
-          </select>
-        </label>
+          </AdminSelect>
+        </AdminField>
 
-        <label className="admin-field">
-          <span>Preset</span>
-          <input value={preset} readOnly placeholder="Bugun / Son 7 Gun / Son 30 Gun / Bu Ay" />
-        </label>
+        <AdminField label="Preset">
+          <AdminInput value={preset} readOnly placeholder="Bugun / Son 7 Gun / Son 30 Gun / Bu Ay" />
+        </AdminField>
       </div>
 
       <div className="admin-filter-actions">
-        <button className="admin-outline-button" type="button" onClick={handleAutoCompare}>
+        <AdminButton variant="outline" onClick={handleAutoCompare}>
           Karsi Donemi Otomatik Doldur
-        </button>
-        <button className="admin-outline-button" type="button" onClick={clearFilters}>
+        </AdminButton>
+        <AdminButton variant="outline" onClick={clearFilters}>
           Sifirla
-        </button>
-        <button className="admin-primary-button" type="button" onClick={applyFilters}>
+        </AdminButton>
+        <AdminButton variant="primary" onClick={applyFilters}>
           Filtreleri Uygula
-        </button>
+        </AdminButton>
       </div>
     </AdminFilterPanel>
   );

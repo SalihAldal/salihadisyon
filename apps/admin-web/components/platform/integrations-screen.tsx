@@ -15,6 +15,7 @@ import {
   testPosIntegrationDevice,
   updatePosIntegrationDevice,
 } from "../../lib/services/platform-service";
+import { AdminButton, AdminConfirmDialog, AdminField, AdminInput, AdminPageHeader, AdminSelect, AdminStateCard, AdminStatusBadge } from "../ui/admin-ui";
 
 export function IntegrationsScreen() {
   const [meta, setMeta] = useState<Record<string, any> | null>(null);
@@ -45,6 +46,7 @@ export function IntegrationsScreen() {
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -142,7 +144,6 @@ export function IntegrationsScreen() {
 
   async function handleDeleteDevice() {
     if (!selectedDeviceId) return;
-    if (!window.confirm("Secili POS cihazi silinsin mi?")) return;
     try {
       setSubmitting(true);
       setError(null);
@@ -195,24 +196,23 @@ export function IntegrationsScreen() {
   }
 
   if (loading) {
-    return <div className="admin-surface admin-empty-state">POS entegrasyon modulu yukleniyor...</div>;
+    return <AdminStateCard tone="info" message="POS entegrasyon modulu yukleniyor..." />;
   }
 
   const totalDevices = devices.length;
   const activeDevices = devices.filter((item) => Boolean(item.isActive)).length;
 
   return (
-    <div className="dashboard-stack admin-reference-page admin-integrations-page">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Pano &gt; POS Ayarlari &gt; POS Cihazlari</p>
-          <h3>POS Entegrasyon Yonetim Modulu</h3>
-        </div>
-        <span className="admin-status-pill admin-status-pill--info">{activeDevices} aktif / {totalDevices} toplam</span>
-      </section>
+    <div className="admin-page-stack admin-pos-settings-page admin-integrations-page">
+      <AdminPageHeader
+        kicker="POS Ayarlari"
+        title="POS Entegrasyon Yonetim Modulu"
+        description="Marka, model, baglanti ve terminal atama akisini tek ekranda yonetin."
+        actions={<AdminStatusBadge tone="info">{activeDevices} aktif / {totalDevices} toplam</AdminStatusBadge>}
+      />
 
-      {error ? <div className="admin-status-pill admin-status-pill--danger">{error}</div> : null}
-      {successMessage ? <div className="admin-status-pill admin-status-pill--success">{successMessage}</div> : null}
+      {error ? <AdminStateCard tone="danger" message={error} /> : null}
+      {successMessage ? <AdminStateCard tone="success" message={successMessage} /> : null}
 
       <section className="admin-surface admin-pos-link-card">
         <div className="admin-section-head">
@@ -221,33 +221,32 @@ export function IntegrationsScreen() {
             <h3>Marka, model ve baglanti bilgisi ile POS cihazi yonet</h3>
           </div>
           <div className="admin-button-row admin-pos-link-actions">
-            <button className="admin-outline-button" type="button" onClick={handleNewDevice}>
+            <AdminButton variant="outline" onClick={handleNewDevice}>
               Yeni
-            </button>
+            </AdminButton>
             {selectedDeviceId ? (
-              <button className="admin-outline-button" type="button" onClick={handleDeleteDevice} disabled={submitting}>
+              <AdminButton variant="outline" className="admin-outline-button--danger" onClick={() => setConfirmDeleteOpen(true)} disabled={submitting} loading={submitting}>
                 Sil
-              </button>
+              </AdminButton>
             ) : null}
             {selectedDeviceId ? (
-              <button className="admin-outline-button" type="button" onClick={handleTest} disabled={testing}>
+              <AdminButton variant="outline" onClick={handleTest} disabled={testing} loading={testing}>
                 {testing ? "Test Ediliyor..." : "Baglantiyi Test Et"}
-              </button>
+              </AdminButton>
             ) : null}
             {selectedDeviceId ? (
-              <button className="admin-outline-button" type="button" onClick={handleToggleActive} disabled={submitting}>
+              <AdminButton variant="outline" onClick={handleToggleActive} disabled={submitting} loading={submitting}>
                 Aktif / Pasif
-              </button>
+              </AdminButton>
             ) : null}
-            <button className="admin-primary-button" type="button" onClick={handleSubmitDevice} disabled={submitting}>
+            <AdminButton variant="primary" onClick={handleSubmitDevice} disabled={submitting} loading={submitting}>
               {submitting ? "Kaydediliyor..." : selectedDeviceId ? "Guncelle" : "POS Cihazi Ekle"}
-            </button>
+            </AdminButton>
           </div>
         </div>
         <div className="admin-form-grid admin-pos-link-form">
-          <label className="admin-field">
-            <span>Sube</span>
-            <select
+          <AdminField label="Sube">
+            <AdminSelect
               value={selectedBranchId}
               onChange={(event) =>
                 setDeviceForm((current) => ({
@@ -262,22 +261,20 @@ export function IntegrationsScreen() {
                   {String(item.name)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>Marka</span>
-            <select value={selectedBrand} onChange={(event) => setDeviceForm((current) => ({ ...current, brand: event.target.value, model: "" }))}>
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="Marka">
+            <AdminSelect value={selectedBrand} onChange={(event) => setDeviceForm((current) => ({ ...current, brand: event.target.value, model: "" }))}>
               <option value="">Seciniz</option>
               {(meta?.brandModels ?? []).map((item: Record<string, unknown>) => (
                 <option key={String(item.brand)} value={String(item.brand)}>
                   {String(item.brand)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>Model</span>
-            <select
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="Model">
+            <AdminSelect
               value={String(deviceForm.model ?? "")}
               disabled={!selectedBrand}
               onChange={(event) => setDeviceForm((current) => ({ ...current, model: event.target.value }))}
@@ -288,23 +285,19 @@ export function IntegrationsScreen() {
                   {String(item.model)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>Cihaz Adi</span>
-            <input value={String(deviceForm.name ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <label className="admin-field">
-            <span>Seri Numarasi</span>
-            <input value={String(deviceForm.serialNumber ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, serialNumber: event.target.value }))} />
-          </label>
-          <label className="admin-field">
-            <span>Sicil Numarasi</span>
-            <input value={String(deviceForm.registryNumber ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, registryNumber: event.target.value }))} />
-          </label>
-          <label className="admin-field">
-            <span>Baglanti Turu</span>
-            <select
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="Cihaz Adi">
+            <AdminInput value={String(deviceForm.name ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, name: event.target.value }))} />
+          </AdminField>
+          <AdminField label="Seri Numarasi">
+            <AdminInput value={String(deviceForm.serialNumber ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, serialNumber: event.target.value }))} />
+          </AdminField>
+          <AdminField label="Sicil Numarasi">
+            <AdminInput value={String(deviceForm.registryNumber ?? "")} onChange={(event) => setDeviceForm((current) => ({ ...current, registryNumber: event.target.value }))} />
+          </AdminField>
+          <AdminField label="Baglanti Turu">
+            <AdminSelect
               value={selectedConnectionType}
               onChange={(event) =>
                 setDeviceForm((current) => ({
@@ -320,58 +313,52 @@ export function IntegrationsScreen() {
                   {String(item.label)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>IP</span>
-            <input
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="IP">
+            <AdminInput
               disabled={selectedConnectionType !== "NETWORK"}
               value={String(deviceForm.ipAddress ?? "")}
               onChange={(event) => setDeviceForm((current) => ({ ...current, ipAddress: event.target.value }))}
             />
-          </label>
-          <label className="admin-field">
-            <span>Port</span>
-            <input
+          </AdminField>
+          <AdminField label="Port">
+            <AdminInput
               type="number"
               disabled={selectedConnectionType !== "NETWORK"}
               value={String(deviceForm.port ?? "")}
               onChange={(event) => setDeviceForm((current) => ({ ...current, port: event.target.value }))}
             />
-          </label>
-          <label className="admin-field">
-            <span>Pin</span>
-            <input
+          </AdminField>
+          <AdminField label="Pin">
+            <AdminInput
               value={String(deviceForm.pinCode ?? "")}
               placeholder={Boolean(activeModelMeta?.requiresPin) ? "Bu modelde zorunlu" : "Opsiyonel"}
               onChange={(event) => setDeviceForm((current) => ({ ...current, pinCode: event.target.value }))}
             />
-          </label>
-          <label className="admin-field">
-            <span>Terminal Atama</span>
-            <select value={String(assignmentForm.terminalId ?? "")} onChange={(event) => setAssignmentForm((current) => ({ ...current, terminalId: event.target.value }))}>
+          </AdminField>
+          <AdminField label="Terminal Atama">
+            <AdminSelect value={String(assignmentForm.terminalId ?? "")} onChange={(event) => setAssignmentForm((current) => ({ ...current, terminalId: event.target.value }))}>
               <option value="">Seciniz</option>
               {filteredTerminals.map((item: Record<string, unknown>) => (
                 <option key={String(item.id)} value={String(item.id)}>
                   {String(item.name)} ({String(item.code)})
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>Varsayilan</span>
-            <select value={String(assignmentForm.isDefault ?? true)} onChange={(event) => setAssignmentForm((current) => ({ ...current, isDefault: event.target.value === "true" }))}>
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="Varsayilan">
+            <AdminSelect value={String(assignmentForm.isDefault ?? true)} onChange={(event) => setAssignmentForm((current) => ({ ...current, isDefault: event.target.value === "true" }))}>
               <option value="true">Evet</option>
               <option value="false">Hayir</option>
-            </select>
-          </label>
-          <label className="admin-field">
-            <span>Aktif</span>
-            <select value={String(deviceForm.isActive ?? true)} onChange={(event) => setDeviceForm((current) => ({ ...current, isActive: event.target.value === "true" }))}>
+            </AdminSelect>
+          </AdminField>
+          <AdminField label="Aktif">
+            <AdminSelect value={String(deviceForm.isActive ?? true)} onChange={(event) => setDeviceForm((current) => ({ ...current, isActive: event.target.value === "true" }))}>
               <option value="true">Evet</option>
               <option value="false">Hayir</option>
-            </select>
-          </label>
+            </AdminSelect>
+          </AdminField>
         </div>
         <div className="admin-table-wrap admin-pos-link-table-wrap">
           <table className="admin-table admin-table--pos-link">
@@ -500,6 +487,18 @@ export function IntegrationsScreen() {
           </section>
         </div>
       </section>
+
+      <AdminConfirmDialog
+        open={confirmDeleteOpen}
+        title="POS cihazını silmek istiyor musun?"
+        description="Bu işlem geri alınamaz."
+        busy={submitting}
+        onCancel={() => setConfirmDeleteOpen(false)}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          void handleDeleteDevice();
+        }}
+      />
     </div>
   );
 }

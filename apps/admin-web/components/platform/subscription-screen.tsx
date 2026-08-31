@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SubscriptionOverviewResponse, SubscriptionPlanResponse } from "../../lib/api/client";
 import { changePlan, fetchSubscriptionOverview, fetchSubscriptionPlans } from "../../lib/services/platform-service";
+import { AdminButton, AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
 
 export function SubscriptionScreen() {
   const [overview, setOverview] = useState<SubscriptionOverviewResponse | null>(null);
@@ -36,39 +37,25 @@ export function SubscriptionScreen() {
     }
   }
 
-  if (loading) return <div className="admin-surface admin-empty-state">Abonelik ekrani yukleniyor...</div>;
-  if (!overview) return <div className="admin-surface admin-empty-state">{error ?? "Abonelik verisi bulunamadi."}</div>;
+  if (loading) return <AdminStateCard tone="info" message="Abonelik ekrani yukleniyor..." />;
+  if (!overview) return <AdminStateCard tone="danger" message={error ?? "Abonelik verisi bulunamadi."} />;
 
   return (
-    <div className="dashboard-stack">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Sprint 8 / Abonelik</p>
-          <h3>Paket, feature ve kullanim limitleri</h3>
-          <p className="admin-subtle-text">{`${overview.plan.name} paketi aktif. Durum: ${overview.subscription.status}`}</p>
-        </div>
-      </section>
+    <div className="admin-page-stack admin-pos-settings-page">
+      <AdminPageHeader
+        kicker="Platform"
+        title="Abonelik"
+        description={`${overview.plan.name} paketi aktif. Durum: ${overview.subscription.status}`}
+      />
 
-      {error ? <div className="admin-status-pill admin-status-pill--danger">{error}</div> : null}
+      {error ? <AdminStateCard tone="danger" message={error} /> : null}
 
-      <section className="dashboard-grid dashboard-grid--stats">
-        <article className="admin-surface admin-stat-card">
-          <span className="admin-kicker">Aylik Paket</span>
-          <strong className="admin-stat-card__value">{overview.plan.priceMonthly} TL</strong>
-        </article>
-        <article className="admin-surface admin-stat-card">
-          <span className="admin-kicker">Sube Limiti</span>
-          <strong className="admin-stat-card__value">{overview.plan.branchLimit}</strong>
-        </article>
-        <article className="admin-surface admin-stat-card">
-          <span className="admin-kicker">Kullanici Limiti</span>
-          <strong className="admin-stat-card__value">{overview.plan.userLimit}</strong>
-        </article>
-        <article className="admin-surface admin-stat-card">
-          <span className="admin-kicker">Trial Bitis</span>
-          <strong className="admin-stat-card__value">{overview.subscription.trialEndsAt ? new Date(overview.subscription.trialEndsAt).toLocaleDateString("tr-TR") : "-"}</strong>
-        </article>
-      </section>
+      <AdminStatsGrid>
+        <AdminStatCard label="Aylik Paket" value={`${overview.plan.priceMonthly} TL`} />
+        <AdminStatCard label="Sube Limiti" value={overview.plan.branchLimit} />
+        <AdminStatCard label="Kullanici Limiti" value={overview.plan.userLimit} />
+        <AdminStatCard label="Trial Bitis" value={overview.subscription.trialEndsAt ? new Date(overview.subscription.trialEndsAt).toLocaleDateString("tr-TR") : "-"} />
+      </AdminStatsGrid>
 
       <section className="dashboard-grid dashboard-grid--secondary">
         <article className="admin-surface">
@@ -114,26 +101,20 @@ export function SubscriptionScreen() {
                 <p className="admin-kicker">{plan.code.toUpperCase()}</p>
                 <h3>{plan.name}</h3>
               </div>
-              <span className="admin-status-pill admin-status-pill--info">{`${plan.priceMonthly} TL/ay`}</span>
+              <AdminStatusBadge tone="info">{`${plan.priceMonthly} TL/ay`}</AdminStatusBadge>
             </div>
             <p className="admin-subtle-text">{`Sube ${plan.branchLimit} / Kullanici ${plan.userLimit}`}</p>
             <div className="admin-filter-actions">
-              <button className="admin-primary-button" type="button" onClick={() => handleChangePlan(plan.code)}>
+              <AdminButton variant="primary" onClick={() => handleChangePlan(plan.code)}>
                 Bu Pakete Gec
-              </button>
+              </AdminButton>
             </div>
           </article>
         ))}
       </section>
 
-      <section className="admin-surface">
-        <div className="admin-section-head">
-          <div>
-            <p className="admin-kicker">Billing</p>
-            <h3>Son fatura kayitlari</h3>
-          </div>
-        </div>
-        <div className="admin-table-wrap">
+      <AdminTableCard kicker="Billing" title="Son fatura kayitlari">
+        <AdminTableWrap>
           <table className="admin-table">
             <thead>
               <tr>
@@ -154,8 +135,8 @@ export function SubscriptionScreen() {
               ))}
             </tbody>
           </table>
-        </div>
-      </section>
+        </AdminTableWrap>
+      </AdminTableCard>
     </div>
   );
 }

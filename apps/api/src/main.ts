@@ -5,7 +5,7 @@ import { NestFactory } from "@nestjs/core";
 import { json, urlencoded } from "express";
 import type { Request, Response, NextFunction } from "express";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { apiRuntimeConfig } from "@adisyon/config";
+import { apiRuntimeConfig, assertProductionRuntimeConfig } from "@adisyon/config";
 import { AppModule } from "./app.module";
 import { AppValidationException } from "./common/errors/app-error";
 import { sanitizeUnknownInput } from "./common/security/sanitize";
@@ -21,6 +21,7 @@ function flattenValidationErrors(errors: ValidationError[], parentPath = ""): Ar
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
+  assertProductionRuntimeConfig();
   process.on("unhandledRejection", (reason) => {
     logger.error("Unhandled promise rejection", reason instanceof Error ? reason.stack : JSON.stringify(reason));
   });
@@ -29,6 +30,7 @@ async function bootstrap() {
   });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks();
   const currentApiVersion = apiRuntimeConfig.apiCurrentVersion || "v1";
   const supportedApiVersions = apiRuntimeConfig.apiSupportedVersions
     .split(",")

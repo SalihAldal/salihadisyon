@@ -7,7 +7,21 @@ export type AdminSidebarItem = SidebarItem & {
 };
 
 export const adminSidebar: AdminSidebarItem[] = [
-  { key: "dashboard", label: "Anasayfa", href: "/", icon: "layout-dashboard", description: "Operasyon merkezi", enabled: true },
+  { key: "dashboard", label: "Anasayfa", href: "/", icon: "layout-dashboard", description: "Operasyon merkezi", enabled: true, anyPermissions: ["dashboard.view"] },
+  {
+    key: "organization",
+    label: "Isletme",
+    href: "/isletme",
+    icon: "building-2",
+    description: "Tenant ve sube yonetimi",
+    enabled: true,
+    anyPermissions: ["dashboard.view", "staff.manage", "subscription.manage"],
+    defaultOpen: true,
+    children: [
+      { key: "company", label: "Isletme Bilgileri", href: "/isletme", enabled: true, anyPermissions: ["subscription.manage"] },
+      { key: "branches", label: "Subeler", href: "/subeler", enabled: true, anyPermissions: ["dashboard.view", "staff.manage"] },
+    ],
+  },
   {
     key: "revenue",
     label: "Ciro",
@@ -46,6 +60,7 @@ export const adminSidebar: AdminSidebarItem[] = [
       { key: "devices", label: "Tanimli Cihazlar", href: "/pos-ayarlari/tanimli-cihazlar", description: "Kiosk, tablet, terminal envanteri", enabled: true, anyPermissions: ["device.view", "device.manage"] },
       { key: "terminals", label: "Terminaller", href: "/pos-ayarlari/terminaller", description: "Terminal performansi ve heartbeat", enabled: true, anyPermissions: ["device.view", "device.manage"] },
       { key: "printers", label: "Yazicilar", href: "/pos-ayarlari/yazicilar", description: "Mutfak ve fis yazici yonetimi", enabled: true, anyPermissions: ["device.view", "device.manage"] },
+      { key: "print-integrations", label: "Fis Entegrasyonlari", href: "/pos-ayarlari/fis-entegrasyonlari", description: "Fislik routing, yazici testi ve baglanti", enabled: true, anyPermissions: ["device.view", "device.manage"] },
       { key: "slider", label: "Arka Ekran Slider", href: "/pos-ayarlari/arka-ekran-slider", description: "POS arka ekran kreatifleri", enabled: true },
       { key: "table-colors", label: "Masa Renkleri", href: "/pos-ayarlari/masa-renkleri", description: "Durum bazli renk sistemleri", enabled: true },
       { key: "discount-types", label: "Indirim Turleri", href: "/pos-ayarlari/indirim-turleri", description: "Yuzde ve tutar bazli setler", enabled: true },
@@ -160,5 +175,9 @@ export const adminSidebar: AdminSidebarItem[] = [
     children: [{ key: "pos-devices", label: "POS Cihazlari", href: "/entegrasyonlar/pos-cihazlari", enabled: true, anyPermissions: ["integrations.view", "device.view"] }],
   },
   { key: "staff-discounts-shortcut", label: "Personel İndirimleri", href: "/personel/personel-indirimleri", icon: "badge-percent", description: "Yetkili indirim ve limitler", enabled: true, anyPermissions: ["staff.view", "staff.manage"] },
+  { key: "audit", label: "Audit Log", href: "/audit", icon: "shield-check", description: "Sistem iz kayitlari", enabled: true, anyPermissions: ["reports.view"] },
+  { key: "subscription", label: "Abonelik", href: "/abonelik", icon: "credit-card", description: "Plan, limit ve kullanim", enabled: true, anyPermissions: ["subscription.view", "subscription.manage"] },
+  { key: "support", label: "Destek", href: "/destek", icon: "life-buoy", description: "Destek talepleri", enabled: true, anyPermissions: ["support.view", "support.manage"] },
+  { key: "product-ratings", label: "Urun Puanlari", href: "/urun-puanlari", icon: "star", description: "Musteri urun geri bildirimleri", enabled: true, anyPermissions: ["reports.view", "product.manage"] },
   { key: "go-pos", label: "Satış Ekranına Git", href: "/satis-ekranina-git", icon: "monitor-up", description: "Canlı satış operasyonuna geç", enabled: true },
 ];

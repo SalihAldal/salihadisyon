@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { getStoredUser, hasStoredPermission } from "../../lib/auth/session";
 import type { FeatureFlagItem } from "../../lib/feature-flags";
 import { fetchFeatureFlags, resetFeatureFlag, updateFeatureFlag } from "../../lib/services/feature-flags-service";
-import { AdminPageHeader, AdminStateCard, AdminStatusBadge } from "../ui/admin-ui";
+import { AdminButton, AdminCheckbox, AdminField, AdminInput, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTextarea } from "../ui/admin-ui";
+import { PosSettingsShell } from "../pos-settings/pos-settings-shell";
 
 type EditorState = {
   enabled: boolean;
@@ -127,27 +128,27 @@ export function FeatureFlagsScreen() {
   }
 
   return (
-    <div className="dashboard-stack admin-reference-page">
-      <section className="admin-page-intro">
-        <AdminPageHeader
-          kicker="Canli Risk Kontrolu"
-          title="Feature Flag Yonetimi"
-          description="Yeni odeme sistemi, yeni rapor ekrani ve beta modulleri canlida kontrollu acip kapat."
-        />
-      </section>
+    <div className="admin-page-stack admin-pos-settings-page">
+      <AdminPageHeader
+        kicker="Sistem"
+        title="Feature Flag Yonetimi"
+        description="Yeni odeme sistemi, yeni rapor ekrani ve beta modulleri canlida kontrollu acip kapat."
+      />
 
       {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
 
-      <section className="admin-module-grid">
-        {items.map((item) => {
-          const draft = drafts[item.key];
-          if (!draft) {
-            return null;
-          }
-          const isSaving = savingKey === item.key;
 
-          return (
-            <article key={item.key} className="admin-surface admin-module-card">
+      <PosSettingsShell activeSlug="feature-flags">
+        <section className="admin-module-grid">
+          {items.map((item) => {
+            const draft = drafts[item.key];
+            if (!draft) {
+              return null;
+            }
+            const isSaving = savingKey === item.key;
+
+            return (
+              <article key={item.key} className="admin-surface admin-module-card">
               <div className="admin-flex admin-flex--between">
                 <div>
                   <p className="admin-kicker">{item.category}</p>
@@ -164,10 +165,8 @@ export function FeatureFlagsScreen() {
                 <span>Default: {item.defaultEnabled ? "Acik" : "Kapali"}</span>
               </div>
 
-              <label className="admin-field">
-                <span>Aktif</span>
-                <input
-                  type="checkbox"
+              <AdminField label="Aktif">
+                <AdminCheckbox
                   checked={draft.enabled}
                   disabled={!canManage || isSaving}
                   onChange={(event) =>
@@ -177,11 +176,10 @@ export function FeatureFlagsScreen() {
                     }))
                   }
                 />
-              </label>
+              </AdminField>
 
-              <label className="admin-field">
-                <span>Rollout Yuzdesi</span>
-                <input
+              <AdminField label="Rollout Yuzdesi">
+                <AdminInput
                   type="number"
                   min="0"
                   max="100"
@@ -197,11 +195,10 @@ export function FeatureFlagsScreen() {
                     }))
                   }
                 />
-              </label>
+              </AdminField>
 
-              <label className="admin-field">
-                <span>Rol Filtreleri</span>
-                <input
+              <AdminField label="Rol Filtreleri">
+                <AdminInput
                   value={draft.allowedRoleKeys}
                   disabled={!canManage || isSaving}
                   onChange={(event) =>
@@ -212,11 +209,10 @@ export function FeatureFlagsScreen() {
                   }
                   placeholder="super_admin, branch_manager"
                 />
-              </label>
+              </AdminField>
 
-              <label className="admin-field">
-                <span>Kullanici ID Filtreleri</span>
-                <input
+              <AdminField label="Kullanici ID Filtreleri">
+                <AdminInput
                   value={draft.allowedUserIds}
                   disabled={!canManage || isSaving}
                   onChange={(event) =>
@@ -227,11 +223,10 @@ export function FeatureFlagsScreen() {
                   }
                   placeholder="cuid1, cuid2"
                 />
-              </label>
+              </AdminField>
 
-              <label className="admin-field">
-                <span>Sube ID Filtreleri</span>
-                <input
+              <AdminField label="Sube ID Filtreleri">
+                <AdminInput
                   value={draft.allowedBranchIds}
                   disabled={!canManage || isSaving}
                   onChange={(event) =>
@@ -242,15 +237,14 @@ export function FeatureFlagsScreen() {
                   }
                   placeholder="branch1, branch2"
                 />
-              </label>
+              </AdminField>
 
               <div className="admin-field">
                 <span>Istemciler</span>
                 <div className="admin-button-row">
                   {(["admin-web", "pos-web", "api"] as const).map((client) => (
                     <label key={client} className="admin-pill-check">
-                      <input
-                        type="checkbox"
+                      <AdminCheckbox
                         checked={draft.clients.includes(client)}
                         disabled={!canManage || isSaving}
                         onChange={(event) =>
@@ -271,9 +265,8 @@ export function FeatureFlagsScreen() {
                 </div>
               </div>
 
-              <label className="admin-field">
-                <span>Not</span>
-                <textarea
+              <AdminField label="Not">
+                <AdminTextarea
                   value={draft.note}
                   disabled={!canManage || isSaving}
                   onChange={(event) =>
@@ -285,20 +278,21 @@ export function FeatureFlagsScreen() {
                   placeholder="Canli rollout notu"
                   rows={3}
                 />
-              </label>
+              </AdminField>
 
               <div className="admin-button-row">
-                <button className="admin-primary-button" type="button" disabled={!canManage || isSaving} onClick={() => void handleSave(item)}>
+                <AdminButton variant="primary" disabled={!canManage || isSaving} loading={isSaving} onClick={() => void handleSave(item)}>
                   {isSaving ? "Kaydediliyor..." : "Kaydet"}
-                </button>
-                <button className="admin-outline-button" type="button" disabled={!canManage || isSaving || !item.override} onClick={() => void handleReset(item)}>
+                </AdminButton>
+                <AdminButton variant="outline" disabled={!canManage || isSaving || !item.override} onClick={() => void handleReset(item)}>
                   Varsayilana Don
-                </button>
+                </AdminButton>
               </div>
             </article>
           );
-        })}
-      </section>
+          })}
+        </section>
+      </PosSettingsShell>
     </div>
   );
 }

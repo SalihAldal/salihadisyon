@@ -7,6 +7,7 @@ import { exportBranchRevenueReport, fetchBranchRevenue } from "../../lib/service
 import { formatTrDateTimeSafe, formatTryCurrency } from "../../lib/utils/admin-format";
 import { downloadCsv } from "../../lib/utils/download";
 import { RevenueFilterForm } from "./revenue-filter-form";
+import { AdminButton, AdminChartCard, AdminField, AdminPageHeader, AdminPagination, AdminSelect, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
 
 export function BranchRevenueScreen() {
   const searchParams = useSearchParams();
@@ -64,35 +65,30 @@ export function BranchRevenueScreen() {
   }, [data?.table, limit, page, totalPages]);
 
   if (loading) {
-    return <div className="admin-surface admin-empty-state">Sube bazli ciro yukleniyor...</div>;
+    return <AdminStateCard message="Şube bazlı ciro yükleniyor..." tone="info" />;
   }
 
   if (error || !data) {
-    return <div className="admin-surface admin-empty-state">{error ?? "Sube bazli ciro verisi bulunamadi."}</div>;
+    return <AdminStateCard message={error ?? "Şube bazlı ciro verisi bulunamadı."} tone="danger" />;
   }
 
   return (
-    <div className="dashboard-stack admin-reference-page admin-revenue-page">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Aldal Pos / Sube Bazli Ciro</p>
-          <h3>Sube performansi, siralama ve export altyapisi</h3>
-        </div>
-        <button className="admin-outline-button" type="button" onClick={handleExport}>
-          Sube Export
-        </button>
-      </section>
+    <div className="admin-page-stack admin-revenue-page">
+      <AdminPageHeader
+        kicker="Ciro"
+        title="Şube Bazlı Ciro"
+        description="Şube performansı, sıralama ve export altyapısı."
+        actions={
+          <AdminButton variant="outline" onClick={handleExport}>
+            Şube Export
+          </AdminButton>
+        }
+      />
 
       <RevenueFilterForm includeBranchSearch />
 
       <section className="dashboard-grid dashboard-grid--hero">
-        <article className="admin-surface admin-chart-card">
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">Grafik</p>
-              <h3>Sube Bazli Ciro Dagilimi</h3>
-            </div>
-          </div>
+        <AdminChartCard kicker="Grafik" title="Şube Bazlı Ciro Dağılımı">
           <div className="admin-chart-live">
             {data.chart.map((point) => (
               <div key={point.label} className="admin-chart-live__item">
@@ -107,21 +103,25 @@ export function BranchRevenueScreen() {
               </div>
             ))}
           </div>
-        </article>
+        </AdminChartCard>
       </section>
 
-      <section className="admin-surface">
-        <div className="admin-section-head">
-          <div>
-            <p className="admin-kicker">Tablo</p>
-            <h3>Sube Bazli Ciro Tablosu</h3>
-          </div>
-          <span className="admin-status-pill admin-status-pill--info">{data.table.length} sube</span>
-        </div>
+      <AdminTableCard
+        kicker="Tablo"
+        title="Şube Bazlı Ciro Tablosu"
+        badge={<AdminStatusBadge tone="info">{data.table.length} şube</AdminStatusBadge>}
+        footer={
+          <AdminPagination
+            page={Math.min(page, totalPages)}
+            totalPages={totalPages}
+            onPrev={() => setPage((current) => Math.max(1, current - 1))}
+            onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+          />
+        }
+      >
         <div className="admin-form-grid">
-          <label className="admin-field">
-            <span>Sayfa Boyutu</span>
-            <select
+          <AdminField label="Sayfa Boyutu">
+            <AdminSelect
               value={String(limit)}
               onChange={(event) => {
                 setLimit(Number(event.target.value));
@@ -131,10 +131,10 @@ export function BranchRevenueScreen() {
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
-            </select>
-          </label>
+            </AdminSelect>
+          </AdminField>
         </div>
-        <div className="admin-table-wrap">
+        <AdminTableWrap>
           <table className="admin-table">
             <thead>
               <tr>
@@ -159,19 +159,8 @@ export function BranchRevenueScreen() {
               ))}
             </tbody>
           </table>
-        </div>
-        <div className="admin-filter-actions">
-          <button className="admin-outline-button" type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>
-            Onceki
-          </button>
-          <span className="admin-status-pill admin-status-pill--info">
-            Sayfa {Math.min(page, totalPages)} / {totalPages}
-          </span>
-          <button className="admin-outline-button" type="button" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={page >= totalPages}>
-            Sonraki
-          </button>
-        </div>
-      </section>
+        </AdminTableWrap>
+      </AdminTableCard>
     </div>
   );
 }

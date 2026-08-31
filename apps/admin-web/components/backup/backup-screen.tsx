@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { SystemBackupListResponse } from "../../lib/api/client";
 import { getStoredUser } from "../../lib/auth/session";
 import { createSystemBackup, fetchSystemBackups, restoreSystemBackup } from "../../lib/services/backup-service";
-import { AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { AdminButton, AdminField, AdminInput, AdminPageHeader, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { PosSettingsShell } from "../pos-settings/pos-settings-shell";
 
 function formatDateTime(value: string | null) {
   if (!value) {
@@ -104,7 +105,7 @@ export function BackupScreen() {
   }
 
   return (
-    <div className="dashboard-stack admin-reference-page">
+    <div className="admin-page-stack admin-pos-settings-page">
       <AdminPageHeader
         kicker="Sistem / Yedekleme"
         title="Veri yedekleme ve geri yukleme merkezi"
@@ -113,110 +114,108 @@ export function BackupScreen() {
 
       {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
 
-      <AdminStatsGrid>
-        <AdminStatCard label="Toplam Kayit" value={data?.summary.total ?? 0} />
-        <AdminStatCard label="Basarili Backup" value={data?.summary.completedCount ?? 0} />
-        <AdminStatCard label="Hatali Backup" value={data?.summary.failedCount ?? 0} />
-      </AdminStatsGrid>
+      <PosSettingsShell activeSlug="yedekleme">
+        <AdminStatsGrid>
+          <AdminStatCard label="Toplam Kayit" value={data?.summary.total ?? 0} />
+          <AdminStatCard label="Basarili Backup" value={data?.summary.completedCount ?? 0} />
+          <AdminStatCard label="Hatali Backup" value={data?.summary.failedCount ?? 0} />
+        </AdminStatsGrid>
 
-      <section className="admin-detail-grid admin-detail-grid--double">
+        <section className="admin-detail-grid admin-detail-grid--double">
+          <AdminTableCard
+            kicker="Manuel Backup"
+            title="Anlik sistem yedegi olustur"
+            footer={
+              <AdminButton variant="primary" onClick={() => void handleManualBackup()} disabled={busyAction !== null} loading={busyAction === "backup"}>
+                {busyAction === "backup" ? "Backup aliniyor..." : "Manuel Backup Baslat"}
+              </AdminButton>
+            }
+          >
+            <AdminField label="Label">
+              <AdminInput value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="Or: deploy-oncesi yedek" />
+            </AdminField>
+            <p className="admin-subtle-text">{`Gunluk otomatik backup da aktif. Backup dizini: ${data?.summary.backupRoot ?? "-"}`}</p>
+          </AdminTableCard>
+
+          <AdminTableCard
+            kicker="Restore"
+            title="Backup dosyasindan geri yukle"
+            footer={
+              <AdminButton variant="primary" onClick={() => void handleRestore()} disabled={busyAction !== null} loading={busyAction === "restore"}>
+                {busyAction === "restore" ? "Restore baslatiliyor..." : "Restore Baslat"}
+              </AdminButton>
+            }
+          >
+            <AdminField label="Backup ID">
+              <AdminInput value={restoreId} onChange={(event) => setRestoreId(event.target.value)} placeholder="Restore edilecek backup ID" />
+            </AdminField>
+            <AdminField label="Onay Metni">
+              <AdminInput value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value)} placeholder="RESTORE yaz" />
+            </AdminField>
+            <AdminField label="Guvenlik Backup">
+              <AdminSelect value={createSafetyBackup ? "yes" : "no"} onChange={(event) => setCreateSafetyBackup(event.target.value === "yes")}>
+                <option value="yes">Evet, restore oncesi ek yedek al</option>
+                <option value="no">Hayir</option>
+              </AdminSelect>
+            </AdminField>
+            <p className="admin-subtle-text">Restore islemi yikici olabilir. Sistem, varsayilan olarak restore oncesi ekstra safety backup alir.</p>
+          </AdminTableCard>
+        </section>
+
         <AdminTableCard
-          kicker="Manuel Backup"
-          title="Anlik sistem yedegi olustur"
-          footer={
-            <button className="admin-primary-button" type="button" onClick={() => void handleManualBackup()} disabled={busyAction !== null}>
-              {busyAction === "backup" ? "Backup aliniyor..." : "Manuel Backup Baslat"}
-            </button>
-          }
+          kicker="Backup Loglari"
+          title="Son 100 backup kaydi"
+          badge={<AdminStatusBadge tone="info">{data?.items.length ?? 0} kayit</AdminStatusBadge>}
         >
-          <label className="admin-field">
-            <span>Label</span>
-            <input value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="Or: deploy-oncesi yedek" />
-          </label>
-          <p className="admin-subtle-text">{`Gunluk otomatik backup da aktif. Backup dizini: ${data?.summary.backupRoot ?? "-"}`}</p>
-        </AdminTableCard>
-
-        <AdminTableCard
-          kicker="Restore"
-          title="Backup dosyasindan geri yukle"
-          footer={
-            <button className="admin-primary-button" type="button" onClick={() => void handleRestore()} disabled={busyAction !== null}>
-              {busyAction === "restore" ? "Restore baslatiliyor..." : "Restore Baslat"}
-            </button>
-          }
-        >
-          <label className="admin-field">
-            <span>Backup ID</span>
-            <input value={restoreId} onChange={(event) => setRestoreId(event.target.value)} placeholder="Restore edilecek backup ID" />
-          </label>
-          <label className="admin-field">
-            <span>Onay Metni</span>
-            <input value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value)} placeholder="RESTORE yaz" />
-          </label>
-          <label className="admin-field">
-            <span>Guvenlik Backup</span>
-            <select value={createSafetyBackup ? "yes" : "no"} onChange={(event) => setCreateSafetyBackup(event.target.value === "yes")}>
-              <option value="yes">Evet, restore oncesi ek yedek al</option>
-              <option value="no">Hayir</option>
-            </select>
-          </label>
-          <p className="admin-subtle-text">Restore islemi yikici olabilir. Sistem, varsayilan olarak restore oncesi ekstra safety backup alir.</p>
-        </AdminTableCard>
-      </section>
-
-      <AdminTableCard
-        kicker="Backup Loglari"
-        title="Son 100 backup kaydi"
-        badge={<AdminStatusBadge tone="info">{data?.items.length ?? 0} kayit</AdminStatusBadge>}
-      >
-        <AdminTableWrap>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Tetik</th>
-                <th>Durum</th>
-                <th>Dosya</th>
-                <th>Boyut</th>
-                <th>Veritabani</th>
-                <th>Baslangic</th>
-                <th>Bitis</th>
-                <th>Hata</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.items ?? []).map((item) => (
-                <tr key={item.id}>
-                  <td>{item.id}</td>
-                  <td>{item.trigger}</td>
-                  <td>
-                    <AdminStatusBadge tone={item.status === "COMPLETED" ? "success" : item.status === "FAILED" ? "danger" : "warning"}>
-                      {item.status}
-                    </AdminStatusBadge>
-                  </td>
-                  <td>{item.fileName ?? "-"}</td>
-                  <td>{formatBytes(item.sizeBytes)}</td>
-                  <td>{item.databaseName ?? "-"}</td>
-                  <td>{formatDateTime(item.startedAt)}</td>
-                  <td>{formatDateTime(item.finishedAt)}</td>
-                  <td>{item.errorMessage ?? "-"}</td>
+          <AdminTableWrap>
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tetik</th>
+                  <th>Durum</th>
+                  <th>Dosya</th>
+                  <th>Boyut</th>
+                  <th>Veritabani</th>
+                  <th>Baslangic</th>
+                  <th>Bitis</th>
+                  <th>Hata</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </AdminTableWrap>
-      </AdminTableCard>
+              </thead>
+              <tbody>
+                {(data?.items ?? []).map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id}</td>
+                    <td>{item.trigger}</td>
+                    <td>
+                      <AdminStatusBadge tone={item.status === "COMPLETED" ? "success" : item.status === "FAILED" ? "danger" : "warning"}>
+                        {item.status}
+                      </AdminStatusBadge>
+                    </td>
+                    <td>{item.fileName ?? "-"}</td>
+                    <td>{formatBytes(item.sizeBytes)}</td>
+                    <td>{item.databaseName ?? "-"}</td>
+                    <td>{formatDateTime(item.startedAt)}</td>
+                    <td>{formatDateTime(item.finishedAt)}</td>
+                    <td>{item.errorMessage ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </AdminTableWrap>
+        </AdminTableCard>
 
-      <AdminTableCard kicker="Kritik Tablolar" title="Veri kaybina karsi ozet sayaclar">
-        <div className="admin-form-grid">
-          {Object.entries((data?.items?.[0]?.criticalSummary as Record<string, number> | null) ?? {}).map(([key, value]) => (
-            <div key={key} className="admin-surface">
-              <p className="admin-kicker">{key}</p>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-      </AdminTableCard>
+        <AdminTableCard kicker="Kritik Tablolar" title="Veri kaybina karsi ozet sayaclar">
+          <div className="admin-form-grid">
+            {Object.entries((data?.items?.[0]?.criticalSummary as Record<string, number> | null) ?? {}).map(([key, value]) => (
+              <div key={key} className="admin-surface">
+                <p className="admin-kicker">{key}</p>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </AdminTableCard>
+      </PosSettingsShell>
     </div>
   );
 }

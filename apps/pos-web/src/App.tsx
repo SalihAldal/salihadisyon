@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import {
   POS_SOCKET_URL,
+  resolvePosSocketPath,
   ensurePosSessionRefreshed,
   getPosSessionInvalidatedEventName,
   getPosSessionRefreshEventName,
@@ -10,6 +11,8 @@ import {
 } from "./api";
 import { emitPosToast, getPosToastEventName, type PosToastPayload } from "./feedback";
 import { PosLoginScreen } from "./components/pos-auth";
+import { WaiterTableLobby } from "./components/waiter-table-lobby";
+import { TicketHierarchyView } from "./components/ticket-hierarchy-view";
 import {
   CatalogContent,
   CatalogPane,
@@ -28,16 +31,19 @@ import { CASH_DENOMINATIONS, FALLBACK_PAYMENT_METHODS, MAX_VISIBLE_PRODUCTS, NOT
 import {
   formatCurrency,
   formatDateInput,
+  formatTableDuration,
   getGroupSelectedCount,
   getMissingSelectionMessages,
   getPaymentBucket,
   getTableColor,
-  getTicketItemSubtitle,
   hasSessionPermission,
   isUnauthorizedError,
+  isWaiterSession,
+  mergeSessionUserFromMe,
   normalizeSessionShape,
   normalizePaymentResult,
   normalizePrintDispatch,
+  persistPosSession,
   readStoredSession,
   roundCurrency,
   sanitizeMoneyInput,
@@ -56,6 +62,9 @@ import {
   type OfflineSyncState,
   type OfflineTicketSnapshot,
 } from "./offline-sync";
+import { getOpenTicketsForTable, isOpenTicketStatus } from "./ticket-hierarchy-utils";
+import { dispatchTicketRoutingPrint } from "./print-dispatch";
+import { formatTicketStatus, getTicketStatusTone, resolveActiveTicketId } from "./waiter-pos-utils";
 
 type PosMode = "TABLE" | "SELF_SERVICE" | "DELIVERY" | "TAKEAWAY";
 type PosDrawerKey =
@@ -70,6 +79,9 @@ type PosDrawerKey =
   | "cancelList"
   | "connections"
   | "ticket"
+  | "transfer"
+  | "merge"
+  | "splitBill"
   | null;
 type ProductFlowTab = "options" | "modifiers" | "notes" | "extras";
 type PrintDocumentType = "receipt" | "kitchen" | "label";
@@ -313,11 +325,6 @@ export function App() {
   const refreshTimerRef = useRef<number | null>(null);
   const offlineSyncStateRef = useRef<OfflineSyncState>(readOfflineSyncState());
   const [session, setSession] = useState<PosAuthSession | null>(() => readStoredSession());
-  const [isWaiterRoute] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const path = window.location.pathname.toLowerCase();
-    return path.startsWith("/garson") || path.startsWith("/waiter");
-  });
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -333,6 +340,7 @@ export function App() {
   const [pendingOrders, setPendingOrders] = useState<Array<Record<string, any>>>([]);
   const [ticketsData, setTicketsData] = useState<Record<string, any>>({});
   const [selectedTicket, setSelectedTicket] = useState<Record<string, any> | null>(null);
+  const [selectedTableContext, setSelectedTableContext] = useState<Record<string, any> | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeFloor, setActiveFloor] = useState<(typeof FLOOR_OPTIONS)[number]["key"]>("ground");
@@ -360,6 +368,11 @@ export function App() {
     itemId: "",
     quantity: "1",
   });
+  const [personSplitDraft, setPersonSplitDraft] = useState<Array<{ label: string; itemId: string; quantity: string }>>([
+    { label: "Kisi 1", itemId: "", quantity: "1" },
+    { label: "Kisi 2", itemId: "", quantity: "1" },
+  ]);
+  const [splitMode, setSplitMode] = useState<"item" | "person">("item");
   const [printJobs, setPrintJobs] = useState<LocalPrintJob[]>([]);
   const [discountForm, setDiscountForm] = useState<{ discountConfigId: string; label: string; amount: string; ticketItemId: string }>({
     discountConfigId: "",
@@ -399,24 +412,37 @@ export function App() {
     discountAmount: string;
     discountLabel: string;
     discountScope: "ticket" | "line";
+    discountMode: "amount" | "percent";
   }>({
     ticketName: "",
     coverCount: "1",
     discountAmount: "",
     discountLabel: "Manuel Indirim",
     discountScope: "ticket",
+    discountMode: "amount",
   });
   const [confirmState, setConfirmState] = useState<{ title: string; message: string; onConfirm: (() => Promise<void>) | null }>({
     title: "",
     message: "",
     onConfirm: null,
   });
+  const [financialConfirm, setFinancialConfirm] = useState<{
+    title: string;
+    message: string;
+    reason: string;
+    onConfirm: ((reason: string) => Promise<void>) | null;
+  }>({
+    title: "",
+    message: "",
+    reason: "",
+    onConfirm: null,
+  });
   const [offlineSyncState, setOfflineSyncState] = useState<OfflineSyncState>(() => readOfflineSyncState());
   const [syncBusy, setSyncBusy] = useState(false);
 
   function openDrawer(key: Exclude<PosDrawerKey, null>) {
-    if (isWaiterRoute && !["ticket", "note"].includes(key)) {
-      setError("Garson ekraninda sadece adisyon/not akisina erisilebilir.");
+    if (isWaiterSession(session) && !["ticket", "note"].includes(key)) {
+      setError("Garson modunda sadece adisyon ve not akisina erisilebilir.");
       return;
     }
     if ((key === "payment" || key === "actions" || key === "note" || key === "ticket") && !selectedTicket) {
@@ -484,6 +510,31 @@ export function App() {
       return next;
     });
   }
+
+  useEffect(() => {
+    if (!session?.accessToken) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = (await posApi.me(session.accessToken)) as Record<string, unknown>;
+        if (cancelled) return;
+        const synced = mergeSessionUserFromMe(session, me);
+        persistPosSession(synced);
+        setSession(synced);
+      } catch {
+        if (!cancelled) {
+          setSession(null);
+          window.localStorage.removeItem(POS_STORAGE_KEY);
+          setError("Oturum dogrulanamadi. Lutfen tekrar giris yapin.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.accessToken]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -611,7 +662,7 @@ export function App() {
   }
 
   function closeDrawer() {
-    if (activeDrawer === "ticket" && isWaiterRoute && selectedTicket?.id) {
+    if (activeDrawer === "ticket" && isWaiterSession(session) && selectedTicket?.id) {
       setWaiterLockedTicketIds((current) => (current.includes(String(selectedTicket.id)) ? current : [...current, String(selectedTicket.id)]));
     }
     if (activeDrawer === "payment") {
@@ -1174,6 +1225,7 @@ export function App() {
   useEffect(() => {
     if (!session || !branchId) return;
     const socket = io(POS_SOCKET_URL, {
+      path: resolvePosSocketPath(),
       transports: ["websocket"],
       auth: {
         token: session.accessToken,
@@ -1196,9 +1248,14 @@ export function App() {
       }, 250);
     };
     socket.on("ticket.updated", refresh);
+    socket.on("pos.ticket.updated", refresh);
     socket.on("payment.completed", refresh);
     socket.on("pos.payment.completed", refresh);
     socket.on("table.status.changed", refresh);
+    socket.on("pos.table.status.changed", refresh);
+    socket.on("pos.bill.requested", refresh);
+    socket.on("bill.requested", refresh);
+    socket.on("pos.ticket.split", refresh);
     socket.on("register.updated", refresh);
     socket.on("inventory.stock.changed", refresh);
     socket.on("refund.requested", refresh);
@@ -1307,6 +1364,8 @@ export function App() {
       };
     });
   }, [tablesByFloor, activeFloor]);
+  const waiterFloorTables = useMemo(() => tablesByFloor[activeFloor] ?? [], [tablesByFloor, activeFloor]);
+  const waiterTicketItemCount = Array.isArray(selectedTicket?.items) ? selectedTicket.items.length : 0;
 
   const topCategories = useMemo(() => categories.filter((item) => !item.parentId), [categories]);
   const categoryParentMap = useMemo(() => {
@@ -1365,6 +1424,24 @@ export function App() {
     [tables, selectedTicket?.tableId],
   );
 
+  const openTicketItems = useMemo(
+    () =>
+      ((ticketsData.items as Array<Record<string, any>> | undefined) ?? []).filter((ticket) =>
+        ["OPEN", "PREPARING", "SERVED", "PAYMENT_PENDING"].includes(String(ticket.status ?? "")),
+      ),
+    [ticketsData.items],
+  );
+
+  const mergeCandidateTickets = useMemo(
+    () =>
+      openTicketItems.filter(
+        (ticket) =>
+          String(ticket.id) !== String(selectedTicket?.id ?? "") &&
+          String(ticket.branchId ?? branchId) === String(branchId ?? ""),
+      ),
+    [openTicketItems, selectedTicket?.id, branchId],
+  );
+
   async function handleLogin(pinCode: string) {
     try {
       setLoading(true);
@@ -1374,6 +1451,7 @@ export function App() {
         throw new Error("Giriş cevabı beklenen formatta değil.");
       }
       window.localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(nextSession));
+      persistPosSession(nextSession);
       setSession(nextSession);
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Giris basarisiz.");
@@ -1419,28 +1497,125 @@ export function App() {
     }
   }
 
-  async function handleSelectTable(table: Record<string, any>) {
-    if (table.activeTicketId) {
-      if (isOfflineTicketId(String(table.activeTicketId))) {
-        applyOfflineTicketSelection(String(table.activeTicketId));
-        setMode("TABLE");
-        setActiveDrawer("ticket");
-        return;
-      }
-      if (!session) return;
-      const detail = await posApi.ticketDetail(session.accessToken, String(table.activeTicketId));
-      setSelectedTicket(detail);
+  async function openTicketById(ticketId: string) {
+    if (!session) return;
+    if (isOfflineTicketId(ticketId)) {
+      applyOfflineTicketSelection(ticketId);
       setMode("TABLE");
       setActiveDrawer("ticket");
       return;
     }
-    await handleCreateTicket("TABLE", String(table.id));
+    const detail = await posApi.ticketDetail(session.accessToken, ticketId);
+    setSelectedTicket(detail);
+    setMode("TABLE");
     setActiveDrawer("ticket");
   }
 
+  function resolveTableOpenTickets(tableId: string) {
+    const serverTickets = getOpenTicketsForTable(
+      ((ticketsData.items as Array<Record<string, any>> | undefined) ?? []).filter((ticket) =>
+        ["OPEN", "PREPARING", "SERVED", "PAYMENT_PENDING"].includes(String(ticket.status ?? "")),
+      ),
+      tableId,
+    );
+    const offlineTickets = getOfflineTicketsForBranch(offlineSyncStateRef.current, branchId).filter(
+      (ticket) => String(ticket.tableId ?? "") === tableId && isOpenTicketStatus(String(ticket.status ?? "OPEN")),
+    );
+    const merged = [...serverTickets];
+    for (const offlineTicket of offlineTickets) {
+      if (!merged.some((ticket) => String(ticket.id) === String(offlineTicket.id))) {
+        merged.push(offlineTicket);
+      }
+    }
+    return merged;
+  }
+
+  async function handleSelectTable(table: Record<string, any>) {
+    if (!session) return;
+    await runOp("selectTable", async () => {
+      setSelectedTableContext(table);
+      const tableId = String(table.id);
+      const tableTickets = resolveTableOpenTickets(tableId);
+
+      if (tableTickets.length === 0) {
+        await handleCreateTicket("TABLE", tableId);
+        setActiveDrawer("ticket");
+        return;
+      }
+
+      if (tableTickets.length === 1) {
+        await openTicketById(String(tableTickets[0].id));
+        return;
+      }
+
+      const preferredTicketId = resolveActiveTicketId(table);
+      const preferredTicket = preferredTicketId
+        ? tableTickets.find((ticket) => String(ticket.id) === String(preferredTicketId))
+        : null;
+
+      if (preferredTicket) {
+        await openTicketById(String(preferredTicket.id));
+        return;
+      }
+
+      setSelectedTicket(null);
+      setMode("TABLE");
+      setActiveDrawer("ticket");
+    });
+  }
+
+  async function handleSelectTicketFromPicker(ticketId: string) {
+    if (!session) return;
+    await runOp("selectTicket", async () => {
+      await openTicketById(ticketId);
+    });
+  }
+
+  async function handleCreateTableTicket() {
+    const tableId = selectedTableContext?.id ?? selectedTicket?.tableId;
+    if (!tableId) return;
+    await handleCreateTicket("TABLE", String(tableId));
+    setActiveDrawer("ticket");
+  }
+
+  async function handleSendToKitchen() {
+    if (!session || !selectedTicket) return;
+    const itemCount = Array.isArray(selectedTicket.items) ? selectedTicket.items.length : 0;
+    if (itemCount <= 0) {
+      setError("Siparis gondermek icin once urun eklemelisin.");
+      return;
+    }
+    await runOp("sendKitchen", async () => {
+      await handlePrint("kitchen");
+      setInfo("Siparis mutfaga/bar'a gonderildi.");
+      emitPosToast({
+        tone: "success",
+        title: "Siparis Gonderildi",
+        message: "Mutfak/bar fisleri yazdirildi.",
+      });
+    });
+  }
+
+  async function handleRequestBill() {
+    if (!session || !selectedTicket) return;
+    await runOp("requestBill", async () => {
+      await posApi.requestBill(session.accessToken, String(selectedTicket.id));
+      await loadAll(branchId, String(selectedTicket.id));
+      setInfo("Hesap istendi.");
+      emitPosToast({ tone: "info", title: "Hesap Istendi", message: "Kasa bilgilendirildi." });
+    });
+  }
+
   function openProductDrawer(product: Record<string, any>) {
+    const activeTableId = String(selectedTableContext?.id ?? selectedTicket?.tableId ?? "");
+    const tableTickets = activeTableId ? resolveTableOpenTickets(activeTableId) : [];
+    if (tableTickets.length > 1 && !selectedTicket) {
+      setError("Bu masada birden fazla adisyon var. Once hangi adisyona urun eklenecegini sec.");
+      setActiveDrawer("ticket");
+      return;
+    }
     if (!selectedTicket) {
-      setError("Once yeni bir adisyon ac. Sag paneldeki butonlari kullanabilirsin.");
+      setError(isWaiterSession(session) ? "Once bir masa secip adisyon ac." : "Once yeni bir adisyon ac. Sag paneldeki butonlari kullanabilirsin.");
       return;
     }
     if (["PAID", "CANCELLED", "VOIDED"].includes(String(selectedTicket.status ?? ""))) {
@@ -1699,7 +1874,7 @@ export function App() {
     await handleSplitByItem(selectedItemId, Math.max(1, Number(item.quantity) / 2));
   }
 
-  async function handleSplitByItem(itemId: string, quantity: number) {
+  async function handleSplitByItem(itemId: string, quantity: number, targetTicketId?: string) {
     if (!session || !selectedTicket || !itemId) return;
     const item = ((selectedTicket.items as Array<Record<string, any>>) ?? []).find((row) => String(row.id) === String(itemId));
     if (!item) {
@@ -1707,27 +1882,86 @@ export function App() {
       return;
     }
     const maxQuantity = Number(item.quantity ?? 0);
-    const safeQuantity = Math.min(Math.max(1, quantity), maxQuantity);
+    const safeQuantity = Math.min(Math.max(0.01, quantity), maxQuantity);
+    if (safeQuantity >= maxQuantity) {
+      setError("Bolme icin kaynak adisyonda urun kalmali. Tamamini tasimak yerine adedi dusurun.");
+      return;
+    }
     await runOp("handleSplit", async () => {
-      await posApi.splitTicket(session.accessToken, String(selectedTicket.id), {
+      const result = await posApi.splitTicket(session.accessToken, String(selectedTicket.id), {
         items: [{ itemId: String(itemId), quantity: safeQuantity }],
         ticketName: `${selectedTicket.ticketName ?? selectedTicket.id} / Bolum`,
         targetChannel: selectedTicket.channel,
       });
-      await loadAll(branchId, String(selectedTicket.id));
+      const target = (result as any)?.target ?? (result as any)?.data?.target;
+      closeDrawer();
+      await loadAll(branchId, target?.id ? String(target.id) : String(selectedTicket.id));
     });
+  }
+
+  async function handlePersonSplit() {
+    if (!session || !selectedTicket) return;
+    const persons = personSplitDraft
+      .map((row, index) => ({
+        label: row.label.trim() || `Kisi ${index + 1}`,
+        items: row.itemId
+          ? [{ itemId: row.itemId, quantity: Math.max(0.01, Number(row.quantity) || 1) }]
+          : [],
+      }))
+      .filter((person) => person.items.length > 0);
+    if (persons.length < 2) {
+      setError("Kisi bazli bolme icin en az iki kisi ve urun secimi gerekli.");
+      return;
+    }
+    openConfirm(
+      "Kisi Bazli Bolme",
+      `${persons.length} ayri hesap olusturulacak. Devam edilsin mi?`,
+      async () => {
+        await runOp("handlePersonSplit", async () => {
+          const result = await posApi.splitTicketByPerson(session.accessToken, String(selectedTicket.id), {
+            persons,
+            targetChannel: selectedTicket.channel,
+          });
+          const firstTarget = (result as any)?.targets?.[0] ?? (result as any)?.data?.targets?.[0];
+          closeDrawer();
+          await loadAll(branchId, firstTarget?.id ? String(firstTarget.id) : String(selectedTicket.id));
+        });
+      },
+    );
+  }
+
+  function openSplitConfirm() {
+    if (!selectedTicket || !splitDraft.itemId) return;
+    const item = ((selectedTicket.items as Array<Record<string, any>>) ?? []).find((row) => String(row.id) === splitDraft.itemId);
+    if (!item) return;
+    const qty = Math.max(0.01, Number(splitDraft.quantity) || 1);
+    openConfirm(
+      "Adisyon Bolme",
+      `${String(item.productName)} urununun ${qty} adedi yeni alt hesaba tasinacak. Devam edilsin mi?`,
+      async () => {
+        await handleSplitByItem(splitDraft.itemId, qty);
+      },
+    );
   }
 
   async function handleMerge(targetTicketId: string) {
     if (!session || !selectedTicket || !targetTicketId) return;
-    await runOp("handleMerge", async () => {
-      await posApi.mergeTickets(session.accessToken, {
-        sourceTicketId: selectedTicket.id,
-        targetTicketId,
-      });
-      closeDrawer();
-      await loadAll(branchId, targetTicketId);
-    });
+    const targetTicket = mergeCandidateTickets.find((ticket) => String(ticket.id) === String(targetTicketId));
+    const targetLabel = targetTicket?.ticketName ?? targetTicket?.table?.name ?? targetTicketId;
+    openConfirm(
+      "Masalari Birlestir",
+      `"${selectedTicket.ticketName ?? selectedTicket.id}" adisyonu "${targetLabel}" adisyonuna birlestirilecek. Devam edilsin mi?`,
+      async () => {
+        await runOp("handleMerge", async () => {
+          await posApi.mergeTickets(session.accessToken, {
+            sourceTicketId: selectedTicket.id,
+            targetTicketId,
+          });
+          closeDrawer();
+          await loadAll(branchId, targetTicketId);
+        });
+      },
+    );
   }
 
   async function handleTransfer(tableId: string) {
@@ -1735,10 +1969,19 @@ export function App() {
       setError("Aktarim icin uygun masa bulunamadi.");
       return;
     }
-    await runOp("handleTransfer", async () => {
-      await posApi.transferTicket(session.accessToken, String(selectedTicket.id), { tableId });
-      await loadAll(branchId, String(selectedTicket.id));
-    });
+    const targetTable = tables.find((table) => String(table.id) === String(tableId));
+    const targetLabel = targetTable?.name ?? tableId;
+    openConfirm(
+      "Masayi Tasima",
+      `"${selectedTicket.ticketName ?? selectedTicket.id}" adisyonu "${targetLabel}" masasina tasinacak. Devam edilsin mi?`,
+      async () => {
+        await runOp("handleTransfer", async () => {
+          await posApi.transferTicket(session.accessToken, String(selectedTicket.id), { tableId });
+          closeDrawer();
+          await loadAll(branchId, String(selectedTicket.id));
+        });
+      },
+    );
   }
 
   async function handlePendingOrderSelect(order: Record<string, any>) {
@@ -1813,6 +2056,55 @@ export function App() {
       throw new Error(message);
     }
     const ticketId = resolveMappedTicketId(offlineSyncStateRef.current, requestedTicketId);
+
+    if (documentType === "kitchen" || documentType === "receipt") {
+      const trigger = documentType === "receipt" ? "receipt" : "production";
+      const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const queuedJob: LocalPrintJob = {
+        id: localJobId,
+        ticketId: requestedTicketId,
+        printerId: "routing",
+        printerName: trigger === "receipt" ? "KASA" : "ROUTING",
+        documentType,
+        status: "queued",
+        queuedAt: new Date().toISOString(),
+        attempts: 1,
+      };
+      setPrintJobs((current) => [queuedJob, ...current].slice(0, 20));
+      await runOp(`print-${localJobId}`, async () => {
+        const dispatch = await dispatchTicketRoutingPrint({
+          accessToken: session.accessToken,
+          ticketId,
+          trigger,
+        });
+        if (dispatch.duplicate) {
+          setInfo("Yazdirma zaten gonderildi.");
+          return;
+        }
+        const failed = dispatch.results.filter((result) => result.status === "failed");
+        const sent = dispatch.results.filter((result) => result.status === "sent" || result.skipped);
+        if (!dispatch.results.length) {
+          throw new Error(trigger === "receipt" ? "Kasa fisi olusturulamadi." : "Yazdirilacak uretim fisi bulunamadi.");
+        }
+        if (failed.length > 0 && sent.length === 0) {
+          throw new Error(failed[0]?.error ?? "Yazdirma basarisiz.");
+        }
+        setPrintJobs((current) =>
+          current.map((jobRow) =>
+            jobRow.id === localJobId
+              ? {
+                  ...jobRow,
+                  status: failed.length > 0 ? "failed" : "sent",
+                  error: failed[0]?.error,
+                  printerName: dispatch.results.map((item) => item.destinationCode).filter(Boolean).join(", ") || jobRow.printerName,
+                }
+              : jobRow,
+          ),
+        );
+      });
+      return;
+    }
+
     let ticketSnapshot =
       selectedTicket &&
       (String(selectedTicket.id) === String(ticketId) || String(selectedTicket.id) === String(requestedTicketId))
@@ -1833,85 +2125,6 @@ export function App() {
       setCatalog(refreshedCatalog);
       printers = (refreshedCatalog.printers as Array<Record<string, any>> | undefined) ?? [];
     }
-    if (documentType === "kitchen") {
-      const categoryItems = groupKitchenItemsByStation(ticketSnapshot.items ?? [], categories, products);
-      const printerForStation = (station: "kitchen" | "bar") =>
-        printers.find((item) => {
-          const type = String(item.type ?? "").toLowerCase();
-          const name = String(item.name ?? "").toLowerCase();
-          if (station === "bar") {
-            return type.includes("bar") || name.includes("bar");
-          }
-          return Boolean(item.isKitchen) || type.includes("kitchen") || type.includes("mutfak") || name.includes("kitchen") || name.includes("mutfak");
-        }) ?? resolvePrinterForDocument("kitchen", printers, preferredPrinterId);
-
-      const jobs: Array<{ station: "kitchen" | "bar"; items: Array<Record<string, any>> }> = [];
-      if (categoryItems.kitchen.length > 0) jobs.push({ station: "kitchen", items: categoryItems.kitchen });
-      if (categoryItems.bar.length > 0) jobs.push({ station: "bar", items: categoryItems.bar });
-
-      if (jobs.length === 0) {
-        const message = "Yazdirilacak mutfak urunu bulunamadi.";
-        setError(message);
-        throw new Error(message);
-      }
-
-      const baseTableLabel = `${ticketSnapshot.table?.name ?? ticketSnapshot.tableName ?? "-"}`;
-      for (const job of jobs) {
-        const printer = printerForStation(job.station);
-        if (!printer) {
-          const message = "Yazici tanimi bulunamadi.";
-          setError(message);
-          throw new Error(message);
-        }
-        const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const kitchenContent = buildKitchenContent(ticketSnapshot, job.items, {
-          stationLabel: job.station === "bar" ? "Bar" : "Mutfak",
-          branchId: String(ticketSnapshot.branchId ?? branchId ?? "-"),
-          tableLabel: baseTableLabel,
-          printerName: String(printer?.name ?? printer?.type ?? printer?.id ?? "Tarayici Yazdirma"),
-        });
-        const queuedJob: LocalPrintJob = {
-          id: localJobId,
-          ticketId: requestedTicketId,
-          printerId: String(printer?.id ?? "browser-print"),
-          printerName: String(printer?.name ?? printer?.type ?? printer?.id ?? "Tarayici Yazdirma"),
-          documentType: "kitchen",
-          status: "queued",
-          queuedAt: new Date().toISOString(),
-          attempts: 1,
-        };
-        setPrintJobs((current) => [queuedJob, ...current].slice(0, 20));
-        await runOp(`print-${localJobId}`, async () => {
-          try {
-            const dispatch = normalizePrintDispatch(
-              await posApi.print(session.accessToken, {
-                ticketId: ticketSnapshot.id,
-                printerId: printer.id,
-                documentType: "kitchen",
-                content: kitchenContent,
-              }),
-            );
-            setPrintJobs((current) =>
-              current.map((jobRow) =>
-                jobRow.id === localJobId
-                  ? { ...jobRow, status: dispatch?.success ? "sent" : "failed" }
-                  : jobRow,
-              ),
-            );
-          } catch (dispatchError) {
-            setPrintJobs((current) =>
-              current.map((jobRow) =>
-                jobRow.id === localJobId
-                  ? { ...jobRow, status: "failed", error: dispatchError instanceof Error ? dispatchError.message : "Print failed" }
-                  : jobRow,
-              ),
-            );
-            throw dispatchError;
-          }
-        });
-      }
-      return;
-    }
 
     const printer = resolvePrinterForDocument(documentType, printers, preferredPrinterId);
     if (!printer) {
@@ -1920,14 +2133,6 @@ export function App() {
       throw new Error(message);
     }
     const localJobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const receiptContent =
-      documentType === "receipt"
-        ? buildReceiptContent(ticketSnapshot, {
-            branchId: String(ticketSnapshot.branchId ?? branchId ?? "-"),
-            terminalName: String(catalog.deviceConfig?.terminalName ?? selectedTerminalId ?? "-"),
-            printerName: String(printer?.name ?? printer?.type ?? printer?.id ?? "Tarayici Yazdirma"),
-          })
-        : undefined;
     const queuedJob: LocalPrintJob = {
       id: localJobId,
       ticketId: requestedTicketId,
@@ -1945,7 +2150,6 @@ export function App() {
           printerId: String(printer!.id),
           ticketId,
           documentType,
-          content: receiptContent,
         }));
         if (!dispatch.success) {
           throw new Error("Yazdirma kuyruga alinamadi.");
@@ -2173,7 +2377,7 @@ export function App() {
     reportWindow.print();
   }
 
-  async function handleVoid() {
+  async function handleVoid(reason: string) {
     if (!session || !selectedTicket) return;
     await runOp("handleVoid", async () => {
       const serverTicketId = resolveServerTicketId(String(selectedTicket.id));
@@ -2185,7 +2389,7 @@ export function App() {
         await loadAll(branchId, null);
         throw new Error("Adisyon bulunamadi.");
       }
-      await posApi.voidTicket(session.accessToken, serverTicketId, { reason: "operator_request" });
+      await posApi.voidTicket(session.accessToken, serverTicketId, { reason });
       await loadAll(branchId);
     });
   }
@@ -2240,7 +2444,7 @@ export function App() {
     });
   }
 
-  async function handleComplimentary() {
+  async function handleComplimentary(reason: string) {
     if (!session || !selectedTicket) return;
     const item = ((selectedTicket.items as Array<Record<string, any>> | undefined) ?? []).find((row) => String(row.id) === selectedItemId);
     if (!item) {
@@ -2250,19 +2454,21 @@ export function App() {
     await runOp("handleComplimentary", async () => {
       await posApi.applyDiscount(session.accessToken, String(selectedTicket.id), {
         ticketItemId: item.id,
-        discountType: "line_manual",
+        discountType: "COMP",
+        discountKind: "COMP",
         label: "Ikram",
         amount: Number(item.lineTotal ?? 0),
+        reason,
       });
       await loadAll(branchId, String(selectedTicket.id));
     });
   }
 
-  async function handleApplyActionDiscount() {
+  async function handleApplyActionDiscount(reason: string) {
     if (!session || !selectedTicket) return;
-    const amount = Number(actionForm.discountAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Indirim tutari gecersiz.");
+    const amountValue = Number(actionForm.discountAmount);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      setError("Indirim degeri gecersiz.");
       return;
     }
     const ticketItemId = actionForm.discountScope === "line" ? selectedItemId : null;
@@ -2270,14 +2476,24 @@ export function App() {
       setError("Satir indirimi icin urun sec.");
       return;
     }
+    const baseTotal = ticketItemId
+      ? Number(((selectedTicket.items as Array<Record<string, any>> | undefined) ?? []).find((row) => String(row.id) === ticketItemId)?.lineTotal ?? 0)
+      : Number(selectedTicket.grandTotal ?? 0);
+    const previewTotal =
+      actionForm.discountMode === "percent"
+        ? roundCurrency(Math.max(baseTotal - (baseTotal * amountValue) / 100, 0))
+        : roundCurrency(Math.max(baseTotal - amountValue, 0));
     await runOp("handleApplyActionDiscount", async () => {
       await posApi.applyDiscount(session.accessToken, String(selectedTicket.id), {
         ticketItemId: ticketItemId ?? undefined,
-        discountType: ticketItemId ? "line_manual" : "ticket_manual",
+        discountType: actionForm.discountMode === "percent" ? "PERCENTAGE" : "AMOUNT",
+        discountKind: "DISCOUNT",
         label: actionForm.discountLabel.trim() || "Manuel Indirim",
-        amount,
+        ...(actionForm.discountMode === "percent" ? { percentage: amountValue } : { amount: amountValue }),
+        reason,
       });
       setActionForm((current) => ({ ...current, discountAmount: "" }));
+      setInfo(`Indirim uygulandi. Yeni toplam yaklasik: ${formatCurrency(previewTotal)}`);
       await loadAll(branchId, String(selectedTicket.id));
     });
   }
@@ -2297,15 +2513,19 @@ export function App() {
     });
   }
 
-  async function handleCancelLine() {
+  async function handleCancelLine(reason: string) {
     if (!session || !selectedTicket || !selectedItemId) {
       setError("Iptal icin satir sec.");
       return;
     }
     await runOp("handleCancelLine", async () => {
-      await posApi.removeItem(session.accessToken, String(selectedTicket.id), selectedItemId);
+      await posApi.voidItem(session.accessToken, String(selectedTicket.id), selectedItemId, { reason });
       await loadAll(branchId, String(selectedTicket.id));
     });
+  }
+
+  function openFinancialConfirm(title: string, message: string, onConfirm: (reason: string) => Promise<void>) {
+    setFinancialConfirm({ title, message, reason: "", onConfirm });
   }
 
   function openConfirm(title: string, message: string, onConfirm: () => Promise<void>) {
@@ -2415,6 +2635,14 @@ export function App() {
   const openTickets = ((ticketsData.items as Array<Record<string, any>>) ?? []).filter((ticket) =>
     ["OPEN", "PREPARING", "SERVED", "PAYMENT_PENDING"].includes(String(ticket.status)),
   );
+  const activeTableId = String(selectedTableContext?.id ?? selectedTicket?.tableId ?? "");
+  const selectedTableOpenTickets = getOpenTicketsForTable(openTickets, activeTableId || null);
+  const selectedTableLabel = String(
+    selectedTableContext?.name ??
+      selectedTableContext?.code ??
+      selectedTicket?.tableName ??
+      (activeTableId ? `Masa ${activeTableId.slice(-4)}` : ""),
+  );
   const historyTickets = ((ticketsData.history as Array<Record<string, any>>) ?? []);
   const selectedProductRequiredGroups = ((selectedProduct?.requiredChoiceGroups as Array<Record<string, any>> | undefined) ?? []);
   const selectedProductModifierGroups = ((selectedProduct?.modifierGroups as Array<Record<string, any>> | undefined) ?? []);
@@ -2447,13 +2675,6 @@ export function App() {
     });
   }
   const paymentMethodOptions = Array.from(paymentMethodMap.values());
-  const selectedTicketItemSubtitles = (() => {
-    const result = new Map<string, string>();
-    for (const item of ((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? [])) {
-      result.set(String(item.id), getTicketItemSubtitle(item, productLookup));
-    }
-    return result;
-  })();
   const discountTypeOptions = discountTypes.filter((item) =>
     Number(item.defaultValue ?? 0) > 0 &&
     ["AMOUNT", "PERCENTAGE", "FIXED_PRICE"].includes(String(item.discountType ?? "")),
@@ -2512,6 +2733,7 @@ export function App() {
       ? rawSelectedTicketPaidAmount
       : 0;
   const splitTotal = paymentSplits.reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+  const splitAccounts = ((selectedTicket?.splitAccounts as Array<Record<string, any>> | undefined) ?? []);
   const paymentRemainingAfterSplits = Math.max(selectedTicketRemainingAmount - splitTotal, 0);
   const anyPending = Object.keys(pendingOps).length > 0;
   const printBusy = Object.keys(pendingOps).some((key) => key.startsWith("print-") || key.startsWith("retryPrint-"));
@@ -2564,27 +2786,20 @@ export function App() {
   const registerExpectedCard = Number(registerResult?.summary?.paymentBreakdown?.card ?? 0);
   const registerExpectedMobile = Number(registerResult?.summary?.paymentBreakdown?.mobile ?? 0);
   const openingCashValue = roundCurrency(Number(registerForm.openingCash));
+  const isWaiterMode = isWaiterSession(session);
   const canManagePayments = hasSessionPermission(session, "payment.manage");
   const canManageExpenses = hasSessionPermission(session, "expense.manage");
   const canOpenRegisterPermission = hasSessionPermission(session, "register.open");
   const canCloseRegisterPermission = hasSessionPermission(session, "register.close");
   const canViewReports = hasSessionPermission(session, "reports.view");
   const canSplitTicket = hasSessionPermission(session, "ticket.manage");
+  const canMergeTickets = hasSessionPermission(session, "table.merge") && !isWaiterMode;
+  const canTransferTable = hasSessionPermission(session, "table.transfer") && !isWaiterMode;
   const canDispatchPrinter = hasSessionPermission(session, "ticket.manage");
   const canRefundTicket = hasSessionPermission(session, "ticket.refund");
   const canOpenDrawerPermission = hasSessionPermission(session, "drawer.open");
   const canViewConnections = hasSessionPermission(session, "device.view");
   const canViewCancelList = hasSessionPermission(session, "reports.view");
-  const roleKey = String(session?.user?.role ?? "").toLowerCase();
-  const isWaiterRole = roleKey.includes("waiter") || roleKey.includes("garson");
-  const hasOpsPermissions =
-    hasSessionPermission(session, "payment.manage") ||
-    hasSessionPermission(session, "register.open") ||
-    hasSessionPermission(session, "register.close") ||
-    hasSessionPermission(session, "reports.view") ||
-    hasSessionPermission(session, "device.view") ||
-    hasSessionPermission(session, "expense.manage");
-  const isWaiterMode = isWaiterRoute || isWaiterRole || !hasOpsPermissions;
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -2637,6 +2852,8 @@ export function App() {
         caption={""}
         search={search}
         onSearchChange={setSearch}
+        modeLabel={isWaiterMode ? "Garson Modu" : undefined}
+        userLabel={session?.user.fullName ?? ""}
       />
       {(error || info || anyPending) ? (
         <div className="pos-runtime-status">
@@ -2664,6 +2881,18 @@ export function App() {
           </CatalogToolbar>
 
           <CatalogContent>
+            {isWaiterMode ? (
+              <WaiterTableLobby
+                floorLabel={`${FLOOR_OPTIONS.find((item) => item.key === activeFloor)?.label ?? "Zemin Kat"} / Masalar`}
+                tables={waiterFloorTables}
+                openTickets={openTickets}
+                loading={loading && waiterFloorTables.length === 0}
+                pending={Boolean(pendingOps.selectTable) || anyPending}
+                onSelectTable={(table) => {
+                  void handleSelectTable(table);
+                }}
+              />
+            ) : (
             <div className="table-lobby">
               <h3>{`${FLOOR_OPTIONS.find((item) => item.key === activeFloor)?.label ?? "Zemin Kat"} / Masalar`}</h3>
               <div className="table-lobby__grid">
@@ -2688,6 +2917,7 @@ export function App() {
                 })}
               </div>
             </div>
+            )}
             {!isWaiterMode ? (
               <OperationsToolbar>
                 <button type="button" onClick={() => openDrawer("ticket")} disabled={!selectedTicket || anyPending}>Adisyon</button>
@@ -3024,7 +3254,15 @@ export function App() {
               <h2>{mode === "TABLE" ? "Masa Servisi" : mode === "DELIVERY" ? "Paket Servis" : mode === "TAKEAWAY" ? "Gel-Al" : "Self Servis"}</h2>
               <p className="ticket-header__meta">
                 {`Adisyon: ${selectedTicket?.ticketName ?? "-"} / Masa: ${selectedTicket?.tableName ?? "-"} / Musteri: ${selectedTicket?.customerName ?? "-"}`}
+                {selectedTicket?.coverCount ? ` / ${selectedTicket.coverCount} kisi` : ""}
+                {selectedTicket?.openedAt ? ` / Sure: ${formatTableDuration(String(selectedTicket.openedAt)) ?? "-"}` : ""}
+                {selectedTicket?.billRequestedAt ? " / Hesap istendi" : ""}
               </p>
+              {isWaiterMode && selectedTicket?.status ? (
+                <span className={`waiter-ticket-status waiter-ticket-status--${getTicketStatusTone(String(selectedTicket.status))} waiter-ticket-header__status`}>
+                  {formatTicketStatus(String(selectedTicket.status))}
+                </span>
+              ) : null}
             </div>
             {!isWaiterMode ? (
               <div className="ticket-header__badges">
@@ -3077,9 +3315,15 @@ export function App() {
               ))}
             </SubcategoryStrip>
             <div className="ticket-modal__products">
-              {pagedProducts.map((product) => (
-                <PosProductCard key={String(product.id)} product={product} onSelect={() => openProductDrawer(product)} />
-              ))}
+              {pendingOps.submitProduct ? (
+                <div className="waiter-lobby__loading">Urun ekleniyor...</div>
+              ) : pagedProducts.length ? (
+                pagedProducts.map((product) => (
+                  <PosProductCard key={String(product.id)} product={product} onSelect={() => openProductDrawer(product)} />
+                ))
+              ) : (
+                <div className="waiter-lobby__empty">Bu kategoride urun bulunamadi.</div>
+              )}
             </div>
           </div>
 
@@ -3118,65 +3362,86 @@ export function App() {
                 <span>Not</span>
               </button>
             </div>
-          ) : null}
+          ) : (
+            <div className="ticket-quick-actions">
+              {canDispatchPrinter ? (
+                <button type="button" onClick={() => void handlePrint("kitchen")} aria-label="Mutfak" disabled={anyPending}>
+                  <span className="ticket-quick-actions__icon">M</span>
+                  <span>Mutfak</span>
+                </button>
+              ) : null}
+              <button type="button" onClick={() => openDrawer("note")} aria-label="Not" disabled={anyPending}>
+                <span className="ticket-quick-actions__icon">N</span>
+                <span>Not</span>
+              </button>
+            </div>
+          )}
 
           {isWaiterMode && isCurrentTicketLockedForWaiter ? (
             <div className="status status--warning">Bu adisyon icin duzenleme kilitli. Sadece yeni urun ekleyebilirsin.</div>
           ) : null}
 
-          <div className="ticket-items">
-            {!selectedTicket ? (
-              <div className="ticket-item ticket-item--empty">Aktif adisyon yok.</div>
-            ) : selectedTicket?.items?.length ? (
-              (selectedTicket.items as Array<Record<string, any>>).map((item) => (
-                <div key={String(item.id)} className={`ticket-item ${selectedItemId === String(item.id) ? "ticket-item--active" : ""}`} onClick={() => setSelectedItemId(String(item.id))}>
-                  <div className="ticket-item__content">
-                    <div>
-                      <strong>{String(item.productName)}</strong>
-                      {(() => {
-                        const subtitle = selectedTicketItemSubtitles.get(String(item.id)) ?? "";
-                        return subtitle ? <p>{subtitle}</p> : null;
-                      })()}
-                    </div>
-                    <span className="ticket-item__tag">{formatCurrency(Number(item.lineTotal ?? 0))}</span>
-                  </div>
-                  <div className="ticket-item__footer">
-                    <div className="quantity-stepper">
-                      <button type="button" onClick={() => void changeQuantity(item, -1)} disabled={Boolean(pendingOps.changeQuantity) || !canMutateCurrentTicketItems}>-</button>
-                      <span>{Number(item.quantity)}</span>
-                      <button type="button" onClick={() => void changeQuantity(item, 1)} disabled={Boolean(pendingOps.changeQuantity) || !canMutateCurrentTicketItems}>+</button>
-                    </div>
+          <div className="ticket-items ticket-items--hierarchy">
+            <TicketHierarchyView
+              ticket={selectedTicket}
+              tableTickets={selectedTableOpenTickets}
+              tableLabel={activeTableId ? selectedTableLabel : undefined}
+              categories={categories}
+              productLookup={productLookup}
+              isWaiterMode={isWaiterMode}
+              canMutateItems={canMutateCurrentTicketItems}
+              selectedItemId={selectedItemId}
+              pending={anyPending}
+              onSelectTicket={(ticketId) => void handleSelectTicketFromPicker(ticketId)}
+              onCreateTicket={!isWaiterMode ? () => void handleCreateTableTicket() : undefined}
+              onSelectItem={setSelectedItemId}
+              onChangeQuantity={(item, diff) => void changeQuantity(item, diff)}
+              onRemoveItem={(item) => {
+                if (!canMutateCurrentTicketItems) {
+                  setError("Garson modunda bu adisyon icin urun silme kilitli.");
+                  return;
+                }
+                if (!selectedTicket) return;
+                setSelectedItemId(String(item.id));
+                openConfirm("Urun Sil", "Bu urunu adisyondan silmek istiyor musun?", async () => {
+                  await posApi.removeItem(session.accessToken, String(selectedTicket.id), String(item.id));
+                  await loadAll(branchId, String(selectedTicket.id));
+                });
+              }}
+              footer={
+                isWaiterMode && selectedTicket ? (
+                  <div className="waiter-ticket-footer">
                     <button
                       type="button"
-                      className="ticket-item__remove"
-                      disabled={anyPending || !canMutateCurrentTicketItems}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!canMutateCurrentTicketItems) {
-                          setError("Garson modunda bu adisyon icin urun silme kilitli.");
-                          return;
-                        }
-                        setSelectedItemId(String(item.id));
-                        openConfirm("Urun Sil", "Bu urunu adisyondan silmek istiyor musun?", async () => {
-                          await posApi.removeItem(session.accessToken, String(selectedTicket.id), String(item.id));
-                          await loadAll(branchId, String(selectedTicket.id));
-                        });
-                      }}
+                      className="waiter-send-kitchen"
+                      disabled={anyPending || waiterTicketItemCount <= 0 || Boolean(pendingOps.sendKitchen)}
+                      onClick={() => void handleSendToKitchen()}
                     >
-                      Sil
+                      {pendingOps.sendKitchen ? "Siparis gonderiliyor..." : "Mutfağa Gönder"}
                     </button>
-                    <strong>{formatCurrency(Number(item.lineTotal ?? 0) - Number(item.discountTotal ?? 0))}</strong>
+                    <button
+                      type="button"
+                      className="waiter-bill-request"
+                      disabled={anyPending || Boolean(selectedTicket.billRequestedAt) || Boolean(pendingOps.requestBill)}
+                      onClick={() => void handleRequestBill()}
+                    >
+                      {pendingOps.requestBill ? "Gonderiliyor..." : selectedTicket.billRequestedAt ? "Hesap Istendi" : "Hesap Istendi"}
+                    </button>
                   </div>
-                </div>
-              ))
-            ) : (
-              <div className="ticket-item ticket-item--empty">- Urun Yok -</div>
-            )}
+                ) : undefined
+              }
+            />
           </div>
 
           {!isWaiterMode ? (
             <div className="pos-inline-actions">
-              <button type="button" onClick={() => openConfirm("Adisyon Iptal", "Adisyonu iptal etmek istiyor musun?", async () => { await handleVoid(); })} disabled={!selectedTicket}>Iptal Et</button>
+              <button
+                type="button"
+                onClick={() => openFinancialConfirm("Adisyon Iptal", "Adisyon iptal edilecek.", handleVoid)}
+                disabled={!selectedTicket}
+              >
+                Iptal Et
+              </button>
               {canManagePayments ? (
                 <button className="primary" type="button" onClick={() => openDrawer("payment")} disabled={!selectedTicket || anyPending}>Odeme Al</button>
               ) : null}
@@ -3295,38 +3560,28 @@ export function App() {
             </div>
             {canSplitTicket ? (
               <div className="payment-modern__split-card">
-                <h5>Urun Bazli Bol</h5>
-                <div className="payment-modern__split-grid">
-                  <label>
-                    <span>Urun</span>
-                    <select
-                      value={splitDraft.itemId}
-                      onChange={(event) => setSplitDraft((current) => ({ ...current, itemId: event.target.value }))}
+                <h5>Urun / Adet Bolme</h5>
+                <p className="admin-subtle-text">Detayli bolme ve kisi bazli hesap icin Adisyon Bol ekranini kullanin.</p>
+                <button type="button" onClick={() => openDrawer("splitBill")} disabled={anyPending}>
+                  Split Bill Ac
+                </button>
+              </div>
+            ) : null}
+            {splitAccounts.length > 0 ? (
+              <div className="payment-modern__split-card">
+                <h5>Alt Hesaplar</h5>
+                <div className="pos-history-grid">
+                  {splitAccounts.map((account) => (
+                    <button
+                      key={String(account.id)}
+                      type="button"
+                      className="pos-history-card"
+                      onClick={() => void openTicketById(String(account.id))}
                     >
-                      {((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).map((item) => (
-                        <option key={String(item.id)} value={String(item.id)}>
-                          {`${String(item.productName)} (${Number(item.quantity)})`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Adet</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={splitDraft.quantity}
-                      onChange={(event) => setSplitDraft((current) => ({ ...current, quantity: event.target.value }))}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => void handleSplitByItem(splitDraft.itemId, Number(splitDraft.quantity))}
-                    disabled={anyPending || !splitDraft.itemId}
-                  >
-                    Yeni Adisyon Olustur
-                  </button>
+                      <strong>{account.personLabel ?? account.ticketName ?? account.id}</strong>
+                      <span>{`${account.status} / ${formatCurrency(Number(account.grandTotal ?? 0))} / Kalan ${formatCurrency(Number(account.remainingAmount ?? 0))}`}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : null}
@@ -3454,19 +3709,58 @@ export function App() {
                   />
                 </label>
               </div>
-              <label className="actions-modern__field">
-                <span>Tutar</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={actionForm.discountAmount}
-                  onChange={(event) => setActionForm((current) => ({ ...current, discountAmount: event.target.value }))}
-                  placeholder="0.00"
-                />
-              </label>
+              <div className="actions-modern__field-grid">
+                <label className="actions-modern__field">
+                  <span>Indirim Turu</span>
+                  <select
+                    value={actionForm.discountMode}
+                    onChange={(event) =>
+                      setActionForm((current) => ({ ...current, discountMode: event.target.value === "percent" ? "percent" : "amount" }))
+                    }
+                  >
+                    <option value="amount">Sabit Tutar</option>
+                    <option value="percent">Yuzde</option>
+                  </select>
+                </label>
+                <label className="actions-modern__field">
+                  <span>{actionForm.discountMode === "percent" ? "Yuzde (%)" : "Tutar"}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step={actionForm.discountMode === "percent" ? "1" : "0.01"}
+                    max={actionForm.discountMode === "percent" ? "100" : undefined}
+                    value={actionForm.discountAmount}
+                    onChange={(event) => setActionForm((current) => ({ ...current, discountAmount: event.target.value }))}
+                    placeholder={actionForm.discountMode === "percent" ? "10" : "0.00"}
+                  />
+                </label>
+              </div>
               <div className="actions-modern__inline-actions">
-                <button className="primary" type="button" onClick={() => void handleApplyActionDiscount()} disabled={anyPending}>Indirim Yap</button>
+                <button
+                  className="primary"
+                  type="button"
+                  onClick={() => {
+                    const baseTotal =
+                      actionForm.discountScope === "line" && selectedItemId
+                        ? Number(
+                            ((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).find((row) => String(row.id) === selectedItemId)?.lineTotal ?? 0,
+                          )
+                        : Number(selectedTicket?.grandTotal ?? 0);
+                    const amountValue = Number(actionForm.discountAmount);
+                    const preview =
+                      actionForm.discountMode === "percent"
+                        ? roundCurrency(Math.max(baseTotal - (baseTotal * amountValue) / 100, 0))
+                        : roundCurrency(Math.max(baseTotal - amountValue, 0));
+                    openFinancialConfirm(
+                      "Indirim Onayi",
+                      `${actionForm.discountScope === "line" ? "Satir" : "Adisyon"} indirimi uygulanacak. Yeni toplam: ${formatCurrency(preview)}`,
+                      handleApplyActionDiscount,
+                    );
+                  }}
+                  disabled={anyPending || !selectedTicket}
+                >
+                  Indirim Yap
+                </button>
               </div>
             </div>
 
@@ -3487,15 +3781,56 @@ export function App() {
             <div className="actions-modern__card">
               <h5>Hizli Islemler</h5>
               <div className="actions-modern__button-grid">
-                <button type="button" onClick={() => openConfirm("Ikram Onayi", "Secili urun ikram edilsin mi?", async () => { await handleComplimentary(); })} disabled={anyPending}>Ikram</button>
-                <button type="button" onClick={() => openConfirm("Urun Iptal", "Secili urun satiri silinsin mi?", async () => { await handleCancelLine(); })} disabled={anyPending}>Urun Sil</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = ((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).find((row) => String(row.id) === selectedItemId);
+                    if (!item) {
+                      setError("Ikram icin satir sec.");
+                      return;
+                    }
+                    openFinancialConfirm(
+                      "Ikram Onayi",
+                      `${String(item.productName ?? "Urun")} — ${formatCurrency(Number(item.lineTotal ?? 0))}\nIkram olarak isaretlenecek.`,
+                      handleComplimentary,
+                    );
+                  }}
+                  disabled={anyPending || !selectedItemId}
+                >
+                  Ikram
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = ((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).find((row) => String(row.id) === selectedItemId);
+                    if (!item) {
+                      setError("Iptal icin satir sec.");
+                      return;
+                    }
+                    openFinancialConfirm(
+                      "Urun Iptal",
+                      `${String(item.productName ?? "Urun")} — ${formatCurrency(Number(item.lineTotal ?? 0))}\nIptal edilecek.`,
+                      handleCancelLine,
+                    );
+                  }}
+                  disabled={anyPending || !selectedItemId}
+                >
+                  Urun Iptal
+                </button>
                 <button type="button" onClick={() => openConfirm("Atik Isaretle", "Secili satiri atik olarak isaretlemek istiyor musun?", async () => { await handleWaste(); })} disabled={anyPending}>Atik</button>
                 {canManagePayments ? <button type="button" onClick={() => openDrawer("payment")} disabled={anyPending}>Odeme Al</button> : null}
                 <button type="button" onClick={() => void handlePrint("label")} disabled={anyPending}>Etiket Yazdir</button>
                 {canOpenDrawerPermission ? <button type="button" onClick={() => void handleDrawerOpen()} disabled={anyPending}>Para Cekmecesi</button> : null}
                 {canViewConnections ? <button type="button" onClick={() => openDrawer("connections")} disabled={anyPending}>Baglanti</button> : null}
-                {canSplitTicket ? <button type="button" onClick={() => void handleSplit()} disabled={anyPending}>Adisyonu Bol</button> : null}
-                <button type="button" onClick={() => transferTargetTableId ? void handleTransfer(String(transferTargetTableId)) : setError("Uygun masa yok.")} disabled={anyPending}>Masa Tasima</button>
+                {canSplitTicket && !isWaiterMode ? (
+                  <button type="button" onClick={() => openDrawer("splitBill")} disabled={anyPending || !selectedTicket}>Adisyon Bol</button>
+                ) : null}
+                {canTransferTable ? (
+                  <button type="button" onClick={() => openDrawer("transfer")} disabled={anyPending || !selectedTicket?.tableId}>Masayi Tasima</button>
+                ) : null}
+                {canMergeTickets ? (
+                  <button type="button" onClick={() => openDrawer("merge")} disabled={anyPending || mergeCandidateTickets.length === 0}>Masalari Birlestir</button>
+                ) : null}
                 {canRefundTicket ? (
                   <button type="button" onClick={() => openConfirm("Iade Baslat", "Secili adisyon icin iade baslatilsin mi?", async () => { await handleRefund(); })} disabled={anyPending}>Iade</button>
                 ) : null}
@@ -3767,18 +4102,209 @@ export function App() {
       </PaymentDrawer>
 
       <PaymentDrawer
+        open={activeDrawer === "splitBill"}
+        eyebrow="Split Bill"
+        title="Adisyon Bolme"
+        onClose={closeDrawer}
+      >
+        <div className="finance-stack">
+          <div className="payment-modern__segments">
+            <button type="button" className={splitMode === "item" ? "active" : ""} onClick={() => setSplitMode("item")}>
+              Urun / Adet
+            </button>
+            <button type="button" className={splitMode === "person" ? "active" : ""} onClick={() => setSplitMode("person")}>
+              Kisi Bazli
+            </button>
+          </div>
+
+          {splitMode === "item" ? (
+            <div className="payment-modern__split-card">
+              <h5>Urun veya Adet Bolme</h5>
+              <div className="payment-modern__split-grid">
+                <label>
+                  <span>Urun</span>
+                  <select
+                    value={splitDraft.itemId}
+                    onChange={(event) => setSplitDraft((current) => ({ ...current, itemId: event.target.value }))}
+                  >
+                    <option value="">Secin</option>
+                    {((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).map((item) => (
+                      <option key={String(item.id)} value={String(item.id)}>
+                        {`${String(item.productName)} (${Number(item.quantity)})`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Adet</span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={splitDraft.quantity}
+                    onChange={(event) => setSplitDraft((current) => ({ ...current, quantity: event.target.value }))}
+                  />
+                </label>
+                <button type="button" onClick={() => openSplitConfirm()} disabled={anyPending || !splitDraft.itemId}>
+                  Alt Hesap Olustur
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="payment-modern__split-card">
+              <h5>Kisi Bazli Bolme</h5>
+              {personSplitDraft.map((row, index) => (
+                <div key={`person-${index}`} className="payment-modern__split-grid">
+                  <label>
+                    <span>Kisi</span>
+                    <input
+                      value={row.label}
+                      onChange={(event) =>
+                        setPersonSplitDraft((current) =>
+                          current.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, label: event.target.value } : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Urun</span>
+                    <select
+                      value={row.itemId}
+                      onChange={(event) =>
+                        setPersonSplitDraft((current) =>
+                          current.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, itemId: event.target.value } : entry,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="">Secin</option>
+                      {((selectedTicket?.items as Array<Record<string, any>> | undefined) ?? []).map((item) => (
+                        <option key={String(item.id)} value={String(item.id)}>
+                          {`${String(item.productName)} (${Number(item.quantity)})`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Adet</span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={row.quantity}
+                      onChange={(event) =>
+                        setPersonSplitDraft((current) =>
+                          current.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, quantity: event.target.value } : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              ))}
+              <button type="button" onClick={() => void handlePersonSplit()} disabled={anyPending}>
+                Kisi Hesaplarini Olustur
+              </button>
+            </div>
+          )}
+
+          {splitAccounts.length > 0 ? (
+            <div className="payment-modern__split-card">
+              <h5>Mevcut Alt Hesaplar</h5>
+              <div className="pos-history-grid">
+                {splitAccounts.map((account) => (
+                  <button
+                    key={String(account.id)}
+                    type="button"
+                    className="pos-history-card"
+                    onClick={() => void openTicketById(String(account.id))}
+                  >
+                    <strong>{account.personLabel ?? account.ticketName ?? account.id}</strong>
+                    <span>{`${formatCurrency(Number(account.grandTotal ?? 0))} / Odenen ${formatCurrency(Number(account.paidTotal ?? 0))} / Kalan ${formatCurrency(Number(account.remainingAmount ?? 0))}`}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </PaymentDrawer>
+
+      <PaymentDrawer
+        open={activeDrawer === "transfer"}
+        eyebrow="Masa Tasima"
+        title="Hedef masa secin"
+        onClose={closeDrawer}
+      >
+        <p className="admin-subtle-text">Yalnizca musait masalar secilebilir. Dolu masalar devre disidir.</p>
+        <div className="pos-history-grid">
+          {tables.length === 0 ? <div className="pos-history-card">Masa bulunamadi.</div> : null}
+          {tables.map((table) => {
+            const isCurrent = String(table.id) === String(selectedTicket?.tableId ?? "");
+            const isAvailable = String(table.status) === "AVAILABLE" && !table.activeTicketId;
+            const isDisabled = isCurrent || !isAvailable;
+            return (
+              <button
+                key={String(table.id)}
+                type="button"
+                className={`pos-history-card${isDisabled ? " pos-history-card--disabled" : ""}`}
+                disabled={isDisabled || anyPending}
+                onClick={() => void handleTransfer(String(table.id))}
+              >
+                <strong>{String(table.name ?? table.code ?? table.id)}</strong>
+                <span>
+                  {isCurrent
+                    ? "Mevcut masa"
+                    : isAvailable
+                      ? "Musait"
+                      : `Dolu / ${String(table.status ?? "OCCUPIED")}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </PaymentDrawer>
+
+      <PaymentDrawer
+        open={activeDrawer === "merge"}
+        eyebrow="Masa Birlestirme"
+        title="Hedef adisyon secin"
+        onClose={closeDrawer}
+      >
+        <p className="admin-subtle-text">Acik adisyonlardan birini secerek mevcut adisyonla birlestirin.</p>
+        <div className="pos-history-grid">
+          {mergeCandidateTickets.length === 0 ? <div className="pos-history-card">Birlestirilecek acik adisyon yok.</div> : null}
+          {mergeCandidateTickets.map((ticket) => (
+            <button
+              key={String(ticket.id)}
+              type="button"
+              className="pos-history-card"
+              disabled={anyPending}
+              onClick={() => void handleMerge(String(ticket.id))}
+            >
+              <strong>{ticket.ticketName ?? ticket.table?.name ?? ticket.id}</strong>
+              <span>{`${ticket.status} / ${formatCurrency(Number(ticket.grandTotal ?? 0))} / ${ticket.table?.name ?? "Masa yok"}`}</span>
+            </button>
+          ))}
+        </div>
+      </PaymentDrawer>
+
+      <PaymentDrawer
         open={activeDrawer === "history"}
         eyebrow="Geçmiş Siparişler"
-        title="Kapalı fişler ve birleştirme hedefleri"
+        title="Kapalı fişler"
         onClose={closeDrawer}
       >
         <div className="pos-history-grid">
           {historyTickets.length === 0 ? <div className="pos-history-card">Gecmis adisyon bulunmuyor.</div> : null}
           {historyTickets.map((ticket) => (
-            <button key={String(ticket.id)} type="button" className="pos-history-card" onClick={() => void handleMerge(String(ticket.id))}>
+            <div key={String(ticket.id)} className="pos-history-card">
               <strong>{ticket.ticketName ?? ticket.id}</strong>
               <span>{`${ticket.status} / ${formatCurrency(Number(ticket.grandTotal ?? 0))}`}</span>
-            </button>
+            </div>
           ))}
         </div>
       </PaymentDrawer>
@@ -3865,6 +4391,41 @@ export function App() {
           </div>
         ) : null}
       </PaymentDrawer>
+
+      {financialConfirm.onConfirm ? (
+        <div className="pos-confirm-backdrop" onClick={() => setFinancialConfirm({ title: "", message: "", reason: "", onConfirm: null })}>
+          <div className="pos-confirm-dialog" onClick={(event) => event.stopPropagation()}>
+            <h3>{financialConfirm.title}</h3>
+            <p style={{ whiteSpace: "pre-line" }}>{financialConfirm.message}</p>
+            <label className="actions-modern__field">
+              <span>Gerekce</span>
+              <input
+                value={financialConfirm.reason}
+                onChange={(event) => setFinancialConfirm((current) => ({ ...current, reason: event.target.value }))}
+                placeholder="En az 3 karakter"
+              />
+            </label>
+            <div className="pos-inline-actions">
+              <button type="button" onClick={() => setFinancialConfirm({ title: "", message: "", reason: "", onConfirm: null })}>Vazgec</button>
+              <button
+                className="primary"
+                type="button"
+                disabled={financialConfirm.reason.trim().length < 3}
+                onClick={() =>
+                  void (async () => {
+                    const fn = financialConfirm.onConfirm;
+                    const reason = financialConfirm.reason.trim();
+                    setFinancialConfirm({ title: "", message: "", reason: "", onConfirm: null });
+                    if (fn) await fn(reason);
+                  })()
+                }
+              >
+                Onayla
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {confirmState.onConfirm ? (
         <div className="pos-confirm-backdrop" onClick={() => setConfirmState({ title: "", message: "", onConfirm: null })}>

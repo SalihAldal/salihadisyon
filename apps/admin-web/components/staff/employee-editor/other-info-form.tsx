@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { formatTryCurrencySafe } from "../../../lib/utils/admin-format";
-import { AdminFilterPanel } from "../../ui/admin-ui";
+import { AdminButton, AdminFilterPanel } from "../../ui/admin-ui";
 import { EmployeeSelectField, EmployeeTextField, EmployeeTextareaField } from "./employee-editor-fields";
 import { ACCOUNT_TYPE_OPTIONS, getCityOptions, getCountryOptions, getDistrictOptions } from "./location-options";
 import type { EmployeeOtherInfoFormData } from "./types";
@@ -28,9 +28,9 @@ export function OtherInfoForm({
       title="Diger Bilgiler"
       description="Adres, finans ve acil durum alanlarini tek blokta yonet."
       actions={
-        <button type="button" className="admin-primary-button" onClick={onSubmit} disabled={saving}>
+        <AdminButton variant="primary" onClick={onSubmit} disabled={saving} loading={saving}>
           {saving ? "Kaydediliyor..." : "Kaydet"}
-        </button>
+        </AdminButton>
       }
     >
       <div className="admin-form-grid">

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountingListResponse, AccountingMetaResponse, AccountingOverviewResponse } from "../../lib/api/client";
 import { accountingScreens, getAccountingScreen } from "../../lib/accounting-config";
 import { subscribeAdminRealtime } from "../../lib/realtime/admin-realtime";
+import { getStoredUser, hasStoredPermission } from "../../lib/auth/session";
 import {
   createAccountingItem,
   deleteAccountingItem,
@@ -19,7 +20,7 @@ import { formatTryCurrencySafe } from "../../lib/utils/admin-format";
 import { formatJsonFieldForTextarea, formatReadableValue, normalizeJsonFieldsForSubmit } from "../../lib/utils/readable-value";
 import { downloadCsv } from "../../lib/utils/download";
 import { getValueByPath } from "../../lib/utils/object-path";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { AdminButton, AdminConfirmDialog, AdminField, AdminFilterPanel, AdminInput, AdminModal, AdminPageHeader, AdminPagination, AdminRowActionMenu, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminSwitchField, AdminTableCard, AdminTableWrap, AdminTextarea } from "../ui/admin-ui";
 
 function normalizeDateTimeValue(value: unknown) {
   if (!value || typeof value !== "string") return "";
@@ -44,6 +45,9 @@ const accountingColumnOrder: Partial<Record<string, string[]>> = {
 
 export function AccountingScreen({ slug }: { slug?: string }) {
   const screen = useMemo(() => getAccountingScreen(slug), [slug]);
+  const canManage = hasStoredPermission(getStoredUser(), "accounting.manage");
+  const canManageCashClosure = hasStoredPermission(getStoredUser(), "cash_closure.manage");
+  const canMutate = screen?.resource === "cash-closures" ? canManageCashClosure : canManage;
   const [overview, setOverview] = useState<AccountingOverviewResponse | null>(null);
   const [meta, setMeta] = useState<AccountingMetaResponse | null>(null);
   const [list, setList] = useState<AccountingListResponse | null>(null);
@@ -56,6 +60,8 @@ export function AccountingScreen({ slug }: { slug?: string }) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const loadAccountingData = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -207,6 +213,24 @@ export function AccountingScreen({ slug }: { slug?: string }) {
     }
   }
 
+  async function handleDeleteById(id: string) {
+    if (!screen || !meta || meta.readOnly) return;
+    setSubmitting(true);
+    try {
+      await deleteAccountingItem(screen.resource, id);
+      if (selectedId === id) {
+        setSelectedId(null);
+        setFormData({});
+        setIsFormModalOpen(false);
+      }
+      await refreshList(screen.resource, filters, page, limit);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Silme islemi basarisiz.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleExport() {
     if (!screen || !meta?.exportable) return;
     const csv = await exportAccountingResource(screen.resource, filters);
@@ -256,7 +280,7 @@ export function AccountingScreen({ slug }: { slug?: string }) {
   if (loading) return <AdminStateCard message="Muhasebe ekranlari yukleniyor..." tone="info" />;
 
   return (
-    <div className={`dashboard-stack admin-reference-page ${screen ? `admin-accounting--${screen.resource}` : "admin-accounting--root"}`}>
+    <div className={`admin-page-stack ${screen ? `admin-accounting--${screen.resource}` : "admin-accounting--root"}`}>
       <AdminPageHeader
         kicker="Muhasebe"
         title={screen ? screen.title : "Muhasebe Kayitlari"}
@@ -265,14 +289,14 @@ export function AccountingScreen({ slug }: { slug?: string }) {
         actions={
           <div className="admin-button-row admin-accounting-actions">
             {screen && meta?.exportable ? (
-              <button className="admin-outline-button" type="button" onClick={handleExport}>
+              <AdminButton variant="outline" onClick={handleExport}>
                 CSV Export
-              </button>
+              </AdminButton>
             ) : null}
-            {screen && !meta?.readOnly ? (
-              <button className="admin-primary-button" type="button" onClick={handleNew}>
+            {screen && !meta?.readOnly && canMutate ? (
+              <AdminButton variant="primary" onClick={handleNew}>
                 Yeni Kayit
-              </button>
+              </AdminButton>
             ) : null}
           </div>
         }
@@ -306,21 +330,16 @@ export function AccountingScreen({ slug }: { slug?: string }) {
               title="Finans hareketlerini tarih ve subeye gore filtrele"
               className="admin-reference-filters"
               actions={
-                <button
-                  className="admin-outline-button"
-                  type="button"
-                  onClick={() => void refreshList(screen.resource, filters, page, limit)}
-                >
+                <AdminButton variant="outline" onClick={() => void refreshList(screen.resource, filters, page, limit)}>
                   Filtrele
-                </button>
+                </AdminButton>
               }
             >
               <div className="admin-form-grid">
                 {meta.filters.map((filter) => (
-                  <label key={filter.key} className="admin-field">
-                    <span>{filter.label}</span>
+                  <AdminField key={filter.key} label={filter.label}>
                     {filter.type === "select" ? (
-                      <select
+                      <AdminSelect
                         value={filters[filter.key] ?? ""}
                         onChange={(event) => {
                           setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
@@ -333,9 +352,9 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </AdminSelect>
                     ) : (
-                      <input
+                      <AdminInput
                         type={filter.type === "date" ? "date" : "text"}
                         value={filters[filter.key] ?? ""}
                         onChange={(event) => {
@@ -344,11 +363,10 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                         }}
                       />
                     )}
-                  </label>
+                  </AdminField>
                 ))}
-                <label className="admin-field">
-                  <span>Sayfa Boyutu</span>
-                  <select
+                <AdminField label="Sayfa Boyutu">
+                  <AdminSelect
                     value={String(limit)}
                     onChange={(event) => {
                       setLimit(Number(event.target.value));
@@ -358,8 +376,8 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                     <option value="20">20</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
-                  </select>
-                </label>
+                  </AdminSelect>
+                </AdminField>
               </div>
             </AdminFilterPanel>
           ) : null}
@@ -382,27 +400,12 @@ export function AccountingScreen({ slug }: { slug?: string }) {
               title={screen.title}
               badge={<AdminStatusBadge tone="info">{list?.pagination.total ?? 0} toplam</AdminStatusBadge>}
               footer={
-                <div className="admin-filter-actions">
-                  <button
-                    className="admin-outline-button"
-                    type="button"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={(list?.pagination.page ?? 1) <= 1}
-                  >
-                    Onceki
-                  </button>
-                  <AdminStatusBadge tone="info">
-                    Sayfa {list?.pagination.page ?? 1} / {list?.pagination.totalPages ?? 1}
-                  </AdminStatusBadge>
-                  <button
-                    className="admin-outline-button"
-                    type="button"
-                    onClick={() => setPage((current) => current + 1)}
-                    disabled={(list?.pagination.page ?? 1) >= (list?.pagination.totalPages ?? 1)}
-                  >
-                    Sonraki
-                  </button>
-                </div>
+                <AdminPagination
+                  page={list?.pagination.page ?? 1}
+                  totalPages={list?.pagination.totalPages ?? 1}
+                  onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
               }
             >
               <AdminTableWrap>
@@ -410,7 +413,9 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                   <thead>
                     <tr>
                       {orderedColumns.map((column) => (
-                        <th key={column.key}>{column.label}</th>
+                        <th key={column.key} className={column.key.toLowerCase().includes("amount") || column.key.toLowerCase().includes("total") ? "admin-th--num" : undefined}>
+                          {column.label}
+                        </th>
                       ))}
                       {!meta?.readOnly ? <th>Islem</th> : null}
                     </tr>
@@ -418,14 +423,15 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                   <tbody>
                     {(list?.items ?? []).map((item) => {
                       const record = item as Record<string, unknown>;
+                      const rowId = String(record.id);
                       return (
-                        <tr key={String(record.id)} onClick={() => handleSelect(String(record.id))} className="admin-table__row--clickable">
+                        <tr key={rowId} onClick={() => handleSelect(rowId)} className="admin-table__row--clickable">
                           {orderedColumns.map((column) => {
                             const value = getValueByPath(record, column.key);
                             if (screen.resource === "cash-closures" && column.key === "varianceAmount") {
                               const variance = Number(value ?? 0);
                               return (
-                                <td key={column.key} className={variance < 0 ? "admin-money--negative" : "admin-money--positive"}>
+                                <td key={column.key} className={`admin-td--num ${variance < 0 ? "admin-money--negative" : "admin-money--positive"}`}>
                                   {formatTryCurrencySafe(value, { maximumFractionDigits: 2 })}
                                 </td>
                               );
@@ -438,16 +444,24 @@ export function AccountingScreen({ slug }: { slug?: string }) {
                               );
                             }
                             if (column.key.toLowerCase().includes("amount") || column.key.toLowerCase().includes("total")) {
-                              return <td key={column.key}>{formatTryCurrencySafe(value, { maximumFractionDigits: 2 })}</td>;
+                              return <td key={column.key} className="admin-td--num">{formatTryCurrencySafe(value, { maximumFractionDigits: 2 })}</td>;
                             }
                             if (screen.resource === "fixed-costs" && column.key === "monthlyEstimate") {
-                              return <td key={column.key}>{formatTryCurrencySafe(value, { maximumFractionDigits: 2 })}</td>;
+                              return <td key={column.key} className="admin-td--num">{formatTryCurrencySafe(value, { maximumFractionDigits: 2 })}</td>;
                             }
                             return <td key={column.key}>{formatReadableValue(value)}</td>;
                           })}
                           {!meta?.readOnly ? (
-                            <td>
-                              <span className="admin-row-actions">✎  ⋮</span>
+                            <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                              <AdminRowActionMenu
+                                open={actionMenuRowId === rowId}
+                                onToggle={() => setActionMenuRowId((current) => (current === rowId ? null : rowId))}
+                                onClose={() => setActionMenuRowId(null)}
+                                items={[
+                                  { key: "edit", label: "Düzenle", onSelect: () => void handleSelect(rowId) },
+                                  { key: "delete", label: "Sil", tone: "danger", onSelect: () => setConfirmDeleteId(rowId) },
+                                ]}
+                              />
                             </td>
                           ) : null}
                         </tr>
@@ -491,91 +505,107 @@ export function AccountingScreen({ slug }: { slug?: string }) {
           )}
 
           {!meta?.readOnly && isFormModalOpen ? (
-            <div className="admin-modal-backdrop" onClick={handleCloseModal}>
-              <section className="admin-modal-card" onClick={(event) => event.stopPropagation()}>
-                <div className="admin-section-head">
-                  <div>
-                    <p className="admin-kicker">Form</p>
-                    <h3>{selectedId ? "Detay / Guncelle" : "Yeni Kayit"}</h3>
+            <AdminModal
+              open={isFormModalOpen}
+              size="lg"
+              kicker="Muhasebe"
+              title={selectedId ? "Kayıt Düzenle" : "Yeni Kayıt"}
+              onClose={handleCloseModal}
+              closeDisabled={submitting}
+              footer={
+                <div className="admin-modal__footer-content">
+                  <div className="admin-modal__footer-left">
+                    <AdminButton variant="text" onClick={handleCloseModal} disabled={submitting}>
+                      Vazgeç
+                    </AdminButton>
+                    {selectedId && canMutate ? (
+                      <AdminButton variant="outline" className="admin-outline-button--danger" onClick={() => setConfirmDeleteId(selectedId)} disabled={submitting}>
+                        Kaydı Sil
+                      </AdminButton>
+                    ) : null}
                   </div>
-                  <button className="admin-outline-button" type="button" onClick={handleCloseModal}>
-                    Kapat
-                  </button>
+                  <div className="admin-modal__footer-right">
+                    {canMutate ? (
+                      <AdminButton variant="primary" disabled={submitting} onClick={handleSubmit} loading={submitting}>
+                        {submitting ? "Kaydediliyor..." : selectedId ? "Güncelle" : "Oluştur"}
+                      </AdminButton>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="admin-form-grid">
-                  {meta?.fields.map((field) => {
-                    const currentValue = formData[field.key];
-                    if (field.type === "textarea") {
-                      return (
-                        <label key={field.key} className="admin-field admin-field--full">
-                          <span>{field.label}</span>
-                          <textarea value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
-                        </label>
-                      );
-                    }
-                    if (field.type === "json") {
-                      return (
-                        <label key={field.key} className="admin-field admin-field--full">
-                          <span>{field.label}</span>
-                          <textarea
-                            value={formatJsonFieldForTextarea(currentValue)}
-                            placeholder="Satir satir veya anahtar: deger formatinda girin"
-                            onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
-                          />
-                        </label>
-                      );
-                    }
-                    if (field.type === "select") {
-                      return (
-                        <label key={field.key} className="admin-field">
-                          <span>{field.label}</span>
-                          <select value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}>
-                            <option value="">Seciniz</option>
-                            {(field.options ?? []).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    }
-                    if (field.type === "switch") {
-                      return (
-                        <label key={field.key} className="admin-field">
-                          <span>{field.label}</span>
-                          <select value={String(currentValue ?? false)} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value === "true" }))}>
-                            <option value="true">Evet</option>
-                            <option value="false">Hayir</option>
-                          </select>
-                        </label>
-                      );
-                    }
+              }
+            >
+              <div className="admin-form-grid admin-form-grid--modal">
+                {meta?.fields.map((field) => {
+                  const currentValue = formData[field.key];
+                  if (field.type === "textarea") {
                     return (
-                      <label key={field.key} className="admin-field">
-                        <span>{field.label}</span>
-                        <input
-                          type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
-                          value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
-                          onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
-                        />
-                      </label>
+                      <AdminField key={field.key} label={field.label} fullWidth>
+                        <AdminTextarea value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
+                      </AdminField>
                     );
-                  })}
-                </div>
-                <div className="admin-filter-actions">
-                  {selectedId ? (
-                    <button className="admin-outline-button" type="button" onClick={handleDelete} disabled={submitting}>
-                      Kaydi Sil
-                    </button>
-                  ) : null}
-                  <button className="admin-primary-button" type="button" disabled={submitting} onClick={handleSubmit}>
-                    {submitting ? "Kaydediliyor..." : selectedId ? "Guncelle" : "Olustur"}
-                  </button>
-                </div>
-              </section>
-            </div>
+                  }
+                  if (field.type === "json") {
+                    return (
+                      <AdminField key={field.key} label={field.label} fullWidth>
+                        <AdminTextarea value={formatJsonFieldForTextarea(currentValue)} placeholder="JSON girin" onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
+                      </AdminField>
+                    );
+                  }
+                  if (field.type === "switch") {
+                    return (
+                      <AdminSwitchField
+                        key={field.key}
+                        label={field.label}
+                        checked={Boolean(currentValue)}
+                        disabled={!canMutate}
+                        onChange={(next) => setFormData((current) => ({ ...current, [field.key]: next }))}
+                      />
+                    );
+                  }
+                  if (field.type === "select") {
+                    return (
+                      <AdminField key={field.key} label={field.label}>
+                        <AdminSelect value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} disabled={!canMutate}>
+                          <option value="">Seçiniz</option>
+                          {(field.options ?? []).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </AdminSelect>
+                      </AdminField>
+                    );
+                  }
+                  return (
+                    <AdminField key={field.key} label={field.label}>
+                      <AdminInput
+                        type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                        value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
+                        disabled={!canMutate}
+                        onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
+                      />
+                    </AdminField>
+                  );
+                })}
+              </div>
+            </AdminModal>
           ) : null}
+
+          <AdminConfirmDialog
+            open={Boolean(confirmDeleteId)}
+            title="Kaydı silmek istiyor musun?"
+            description="Bu işlem geri alınamaz."
+            confirmLabel="Sil"
+            cancelLabel="İptal"
+            busy={submitting}
+            onCancel={() => setConfirmDeleteId(null)}
+            onConfirm={() => {
+              const id = confirmDeleteId;
+              if (!id) return;
+              setConfirmDeleteId(null);
+              void handleDeleteById(id);
+            }}
+          />
         </>
       )}
     </div>

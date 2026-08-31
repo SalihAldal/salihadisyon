@@ -4,17 +4,25 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import type { DashboardOverviewResponse } from "../../lib/api/client";
-import { getStoredAccessToken } from "../../lib/auth/session";
+import { getStoredAccessToken, getStoredUser } from "../../lib/auth/session";
 import { subscribeAdminRealtime } from "../../lib/realtime/admin-realtime";
 import { fetchDashboardOverview, exportDashboardOverview } from "../../lib/services/dashboard-service";
 import { downloadCsv } from "../../lib/utils/download";
-import { AdminPageHeader, AdminStateCard } from "../ui/admin-ui";
+import { AdminButton, AdminPageHeader, AdminStateCard } from "../ui/admin-ui";
 import { DashboardFilterForm } from "./dashboard-filter-form";
 import { DashboardWidgets } from "./dashboard-widgets";
 
 export function DashboardScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const userName = useMemo(() => {
+    try {
+      const user = getStoredUser();
+      return user?.fullName || user?.email || "Panel Kullanıcısı";
+    } catch {
+      return "Panel Kullanıcısı";
+    }
+  }, []);
   const query = useMemo(
     () => ({
       branchId: searchParams.get("branchId") ?? undefined,
@@ -97,15 +105,20 @@ export function DashboardScreen() {
   }
 
   return (
-    <div className="dashboard-stack">
+    <div className="admin-page-stack admin-dashboard-page">
       <AdminPageHeader
-        kicker="Aldal Pos / Dashboard"
-        title="Gercek widget yapisi ile canli operasyon merkezi"
-        description="Yogun veri kullanimi icin daha okunakli, premium ve karar odakli panel akisi."
+        kicker="Pano"
+        title={`Hoş geldiniz, ${userName}`}
+        description="Seçili tarih aralığına göre KPI, analitik ve operasyon akışını izleyin."
         actions={
-          <button className="admin-outline-button" type="button" onClick={handleExport}>
-            Dashboard Export
-          </button>
+          <>
+            <AdminButton variant="outline" onClick={() => void loadDashboard(false)}>
+              Yenile
+            </AdminButton>
+            <AdminButton variant="outline" onClick={() => void handleExport()}>
+              Dışa Aktar
+            </AdminButton>
+          </>
         }
       />
 

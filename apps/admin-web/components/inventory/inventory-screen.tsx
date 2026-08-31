@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InventoryListResponse, InventoryMetaResponse, InventoryOverviewResponse } from "../../lib/api/client";
 import { getInventoryScreen, inventoryScreens } from "../../lib/inventory-config";
 import { subscribeAdminRealtime } from "../../lib/realtime/admin-realtime";
+import { getStoredUser, hasStoredPermission } from "../../lib/auth/session";
 import {
   createInventoryItem,
   deleteInventoryItem,
@@ -19,7 +20,26 @@ import {
 import { getValueByPath } from "../../lib/utils/object-path";
 import { downloadCsv } from "../../lib/utils/download";
 import { formatReadableValue, normalizeJsonFieldsForSubmit } from "../../lib/utils/readable-value";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import {
+  AdminButton,
+  AdminConfirmDialog,
+  AdminField,
+  AdminFilterPanel,
+  AdminInput,
+  AdminModal,
+  AdminPageHeader,
+  AdminPagination,
+  AdminRowActionMenu,
+  AdminStateCard,
+  AdminStatCard,
+  AdminStatsGrid,
+  AdminStatusBadge,
+  AdminSelect,
+  AdminSwitchField,
+  AdminTableCard,
+  AdminTableWrap,
+  AdminTextarea,
+} from "../ui/admin-ui";
 
 const inventoryColumnOrder: Partial<Record<string, string[]>> = {
   "stock-status": ["name", "warehouse", "category", "unit", "currentStock", "minimumLevel", "status"],
@@ -29,6 +49,7 @@ const inventoryColumnOrder: Partial<Record<string, string[]>> = {
 
 export function InventoryScreen({ slug }: { slug?: string }) {
   const screen = useMemo(() => getInventoryScreen(slug), [slug]);
+  const canManage = hasStoredPermission(getStoredUser(), "inventory.manage");
   const [overview, setOverview] = useState<InventoryOverviewResponse | null>(null);
   const [meta, setMeta] = useState<InventoryMetaResponse | null>(null);
   const [list, setList] = useState<InventoryListResponse | null>(null);
@@ -42,6 +63,19 @@ export function InventoryScreen({ slug }: { slug?: string }) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!actionMenuRowId) return;
+    const handleClose = () => setActionMenuRowId(null);
+    document.addEventListener("click", handleClose, true);
+    document.addEventListener("scroll", handleClose, true);
+    return () => {
+      document.removeEventListener("click", handleClose, true);
+      document.removeEventListener("scroll", handleClose, true);
+    };
+  }, [actionMenuRowId]);
 
   const loadInventoryData = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -188,6 +222,24 @@ export function InventoryScreen({ slug }: { slug?: string }) {
     }
   }
 
+  async function handleDeleteById(id: string) {
+    if (!screen || !meta || meta.readOnly) return;
+    setSubmitting(true);
+    try {
+      await deleteInventoryItem(screen.resource, id);
+      if (selectedId === id) {
+        setSelectedId(null);
+        setFormData({});
+        setIsFormModalOpen(false);
+      }
+      await refreshList(screen.resource, filters, page, limit);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Silme islemi basarisiz.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleExport() {
     if (!screen || !meta?.exportable) return;
     const csv = await exportInventoryResource(screen.resource, filters);
@@ -235,7 +287,7 @@ export function InventoryScreen({ slug }: { slug?: string }) {
   if (loading) return <AdminStateCard message="Stok ekranlari yukleniyor..." tone="info" />;
 
   return (
-    <div className={`dashboard-stack admin-reference-page ${screen ? `admin-inventory--${screen.resource}` : "admin-inventory--root"}`}>
+    <div className={`admin-page-stack ${screen ? `admin-inventory--${screen.resource}` : "admin-inventory--root"}`}>
       <AdminPageHeader
         kicker="Sprint 6 / Stok"
         title={screen ? screen.title : "Stok Modulu"}
@@ -244,19 +296,19 @@ export function InventoryScreen({ slug }: { slug?: string }) {
         actions={
           <div className="admin-button-row admin-inventory-actions">
             {screen && meta?.actions?.syncSales ? (
-              <button className="admin-outline-button" type="button" onClick={handleSyncSales} disabled={submitting}>
+              <AdminButton variant="outline" onClick={handleSyncSales} disabled={submitting} loading={submitting}>
                 Satistan Stok Dus
-              </button>
+              </AdminButton>
             ) : null}
             {screen && meta?.exportable ? (
-              <button className="admin-outline-button" type="button" onClick={handleExport}>
+              <AdminButton variant="outline" onClick={handleExport}>
                 CSV Export
-              </button>
+              </AdminButton>
             ) : null}
-            {screen && !meta?.readOnly ? (
-              <button className="admin-primary-button" type="button" onClick={handleNew}>
+            {screen && !meta?.readOnly && canManage ? (
+              <AdminButton variant="primary" onClick={handleNew}>
                 Yeni Kayit
-              </button>
+              </AdminButton>
             ) : null}
           </div>
         }
@@ -328,21 +380,20 @@ export function InventoryScreen({ slug }: { slug?: string }) {
               className="admin-reference-filters"
               actions={
                 <>
-                  <button className="admin-outline-button" type="button" onClick={clearFilters}>
+                  <AdminButton variant="outline" onClick={clearFilters}>
                     Temizle
-                  </button>
-                  <button className="admin-primary-button" type="button" onClick={applyFilters}>
+                  </AdminButton>
+                  <AdminButton variant="primary" onClick={applyFilters}>
                     Filtrele
-                  </button>
+                  </AdminButton>
                 </>
               }
             >
               <div className="admin-form-grid" onKeyDown={(event) => (event.key === "Enter" ? applyFilters() : undefined)}>
                 {meta.filters.map((filter) => (
-                  <label key={filter.key} className="admin-field">
-                    <span>{filter.label}</span>
+                  <AdminField key={filter.key} label={filter.label}>
                     {filter.type === "select" ? (
-                      <select
+                      <AdminSelect
                         value={draftFilters[filter.key] ?? ""}
                         onChange={(event) => {
                           setDraftFilters((current) => ({ ...current, [filter.key]: event.target.value }));
@@ -354,9 +405,9 @@ export function InventoryScreen({ slug }: { slug?: string }) {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </AdminSelect>
                     ) : (
-                      <input
+                      <AdminInput
                         type={filter.type === "date" ? "date" : "text"}
                         value={draftFilters[filter.key] ?? ""}
                         onChange={(event) => {
@@ -364,47 +415,41 @@ export function InventoryScreen({ slug }: { slug?: string }) {
                         }}
                       />
                     )}
-                  </label>
+                  </AdminField>
                 ))}
                 {!meta.filters.some((item) => item.key === "search") ? (
-                  <label className="admin-field">
-                    <span>Ara</span>
-                    <input value={draftFilters.search ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))} />
-                  </label>
+                  <AdminField label="Ara">
+                    <AdminInput value={draftFilters.search ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))} />
+                  </AdminField>
                 ) : null}
                 {!meta.filters.some((item) => item.key === "startDate") ? (
-                  <label className="admin-field">
-                    <span>Baslangic</span>
-                    <input type="date" value={draftFilters.startDate ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, startDate: event.target.value }))} />
-                  </label>
+                  <AdminField label="Baslangic">
+                    <AdminInput type="date" value={draftFilters.startDate ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, startDate: event.target.value }))} />
+                  </AdminField>
                 ) : null}
                 {!meta.filters.some((item) => item.key === "endDate") ? (
-                  <label className="admin-field">
-                    <span>Bitis</span>
-                    <input type="date" value={draftFilters.endDate ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, endDate: event.target.value }))} />
-                  </label>
+                  <AdminField label="Bitis">
+                    <AdminInput type="date" value={draftFilters.endDate ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, endDate: event.target.value }))} />
+                  </AdminField>
                 ) : null}
-                <label className="admin-field">
-                  <span>Sirala</span>
-                  <select value={draftFilters.sortBy ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, sortBy: event.target.value }))}>
+                <AdminField label="Sirala">
+                  <AdminSelect value={draftFilters.sortBy ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, sortBy: event.target.value }))}>
                     <option value="">Varsayilan</option>
                     {orderedColumns.map((column) => (
                       <option key={column.key} value={column.key}>
                         {column.label}
                       </option>
                     ))}
-                  </select>
-                </label>
-                <label className="admin-field">
-                  <span>Yon</span>
-                  <select value={draftFilters.sortDirection ?? "desc"} onChange={(event) => setDraftFilters((current) => ({ ...current, sortDirection: event.target.value }))}>
+                  </AdminSelect>
+                </AdminField>
+                <AdminField label="Yon">
+                  <AdminSelect value={draftFilters.sortDirection ?? "desc"} onChange={(event) => setDraftFilters((current) => ({ ...current, sortDirection: event.target.value }))}>
                     <option value="desc">Azalan</option>
                     <option value="asc">Artan</option>
-                  </select>
-                </label>
-                <label className="admin-field">
-                  <span>Sayfa Boyutu</span>
-                  <select
+                  </AdminSelect>
+                </AdminField>
+                <AdminField label="Sayfa Boyutu">
+                  <AdminSelect
                     value={String(limit)}
                     onChange={(event) => {
                       setLimit(Number(event.target.value));
@@ -414,8 +459,8 @@ export function InventoryScreen({ slug }: { slug?: string }) {
                     <option value="20">20</option>
                     <option value="50">50</option>
                     <option value="100">100</option>
-                  </select>
-                </label>
+                  </AdminSelect>
+                </AdminField>
               </div>
             </AdminFilterPanel>
           ) : null}
@@ -426,27 +471,12 @@ export function InventoryScreen({ slug }: { slug?: string }) {
               title={screen.title}
               badge={<AdminStatusBadge tone="info">{list?.pagination.total ?? 0} toplam</AdminStatusBadge>}
               footer={
-                <div className="admin-filter-actions">
-                  <button
-                    className="admin-outline-button"
-                    type="button"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={(list?.pagination.page ?? 1) <= 1}
-                  >
-                    Onceki
-                  </button>
-                  <AdminStatusBadge tone="info">
-                    Sayfa {list?.pagination.page ?? 1} / {list?.pagination.totalPages ?? 1}
-                  </AdminStatusBadge>
-                  <button
-                    className="admin-outline-button"
-                    type="button"
-                    onClick={() => setPage((current) => current + 1)}
-                    disabled={(list?.pagination.page ?? 1) >= (list?.pagination.totalPages ?? 1)}
-                  >
-                    Sonraki
-                  </button>
-                </div>
+                <AdminPagination
+                  page={list?.pagination.page ?? 1}
+                  totalPages={list?.pagination.totalPages ?? 1}
+                  onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
               }
             >
               <AdminTableWrap>
@@ -456,20 +486,44 @@ export function InventoryScreen({ slug }: { slug?: string }) {
                       {orderedColumns.map((column) => (
                         <th key={column.key}>{column.label}</th>
                       ))}
-                      {!meta?.readOnly ? <th>Islem</th> : null}
+                      {!meta?.readOnly ? <th className="admin-th--actions">İşlemler</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {(list?.items ?? []).map((item) => {
                       const record = item as Record<string, unknown>;
+                      const rowId = String(record.id);
                       return (
-                        <tr key={String(record.id)} onClick={() => handleSelect(String(record.id))} className="admin-table__row--clickable">
+                        <tr key={rowId} onClick={() => handleSelect(rowId)} className="admin-table__row--clickable">
                           {orderedColumns.map((column) => (
                             <td key={column.key}>{formatReadableValue(getValueByPath(record, column.key))}</td>
                           ))}
                           {!meta?.readOnly ? (
-                            <td>
-                              <span className="admin-row-actions">✎  ⋮</span>
+                            <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                              <AdminRowActionMenu
+                                open={actionMenuRowId === rowId}
+                                onToggle={() => setActionMenuRowId((current) => (current === rowId ? null : rowId))}
+                                onClose={() => setActionMenuRowId(null)}
+                                disabled={submitting}
+                                items={[
+                                  {
+                                    key: "edit",
+                                    label: "Düzenle",
+                                    disabled: !canManage,
+                                    onSelect: () => {
+                                      handleSelect(rowId);
+                                      setIsFormModalOpen(true);
+                                    },
+                                  },
+                                  {
+                                    key: "delete",
+                                    label: "Sil",
+                                    tone: "danger",
+                                    disabled: !canManage,
+                                    onSelect: () => setConfirmDeleteId(rowId),
+                                  },
+                                ]}
+                              />
                             </td>
                           ) : null}
                         </tr>
@@ -501,79 +555,100 @@ export function InventoryScreen({ slug }: { slug?: string }) {
           </section>
 
           {!meta?.readOnly && isFormModalOpen ? (
-            <div className="admin-modal-backdrop" onClick={handleCloseModal}>
-              <section className="admin-modal-card" onClick={(event) => event.stopPropagation()}>
-                <div className="admin-section-head">
-                  <div>
-                    <p className="admin-kicker">Form</p>
-                    <h3>{selectedId ? "Detay / Guncelle" : "Yeni Kayit"}</h3>
+            <AdminModal
+              open={isFormModalOpen}
+              size="lg"
+              kicker="Stok"
+              title={selectedId ? "Kayıt Düzenle" : "Yeni Kayıt"}
+              onClose={handleCloseModal}
+              closeDisabled={submitting}
+              footer={
+                <div className="admin-modal__footer-content">
+                  <div className="admin-modal__footer-left">
+                    <AdminButton variant="text" onClick={handleCloseModal} disabled={submitting}>
+                      Vazgeç
+                    </AdminButton>
+                    {selectedId && canManage ? (
+                      <AdminButton variant="outline" className="admin-outline-button--danger" onClick={() => setConfirmDeleteId(selectedId)} disabled={submitting}>
+                        Kaydı Sil
+                      </AdminButton>
+                    ) : null}
                   </div>
-                  <button className="admin-outline-button" type="button" onClick={handleCloseModal}>
-                    Kapat
-                  </button>
+                  <div className="admin-modal__footer-right">
+                    {canManage ? (
+                      <AdminButton variant="primary" disabled={submitting} onClick={handleSubmit} loading={submitting}>
+                        {submitting ? "Kaydediliyor..." : selectedId ? "Güncelle" : "Oluştur"}
+                      </AdminButton>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="admin-form-grid">
-                  {meta?.fields.map((field) => {
-                    const currentValue = formData[field.key];
-                    if (field.type === "textarea") {
-                      return (
-                        <label key={field.key} className="admin-field admin-field--full">
-                          <span>{field.label}</span>
-                          <textarea value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
-                        </label>
-                      );
-                    }
-                    if (field.type === "switch") {
-                      return (
-                        <label key={field.key} className="admin-field">
-                          <span>{field.label}</span>
-                          <select value={String(currentValue ?? true)} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value === "true" }))}>
-                            <option value="true">Aktif</option>
-                            <option value="false">Pasif</option>
-                          </select>
-                        </label>
-                      );
-                    }
-                    if (field.type === "select") {
-                      return (
-                        <label key={field.key} className="admin-field">
-                          <span>{field.label}</span>
-                          <select value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}>
-                            <option value="">Seciniz</option>
-                            {(field.options ?? []).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    }
+              }
+            >
+              <div className="admin-form-grid admin-form-grid--modal-sm">
+                {meta?.fields.map((field) => {
+                  const currentValue = formData[field.key];
+                  if (field.type === "textarea") {
                     return (
-                      <label key={field.key} className="admin-field">
-                        <span>{field.label}</span>
-                        <input
-                          type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
-                          value={String(currentValue ?? "")}
-                          onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
-                        />
-                      </label>
+                      <AdminField key={field.key} label={field.label} fullWidth>
+                        <AdminTextarea value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
+                      </AdminField>
                     );
-                  })}
-                </div>
-                <div className="admin-filter-actions">
-                  {selectedId ? (
-                    <button className="admin-outline-button" type="button" onClick={handleDelete} disabled={submitting}>
-                      Kaydi Sil
-                    </button>
-                  ) : null}
-                  <button className="admin-primary-button" type="button" disabled={submitting} onClick={handleSubmit}>
-                    {submitting ? "Kaydediliyor..." : selectedId ? "Guncelle" : "Olustur"}
-                  </button>
-                </div>
-              </section>
-            </div>
+                  }
+                  if (field.type === "switch") {
+                    return (
+                      <AdminSwitchField
+                        key={field.key}
+                        label={field.label}
+                        checked={Boolean(currentValue)}
+                        disabled={!canManage}
+                        onChange={(next) => setFormData((current) => ({ ...current, [field.key]: next }))}
+                      />
+                    );
+                  }
+                  if (field.type === "select") {
+                    return (
+                      <AdminField key={field.key} label={field.label}>
+                        <AdminSelect value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} disabled={!canManage}>
+                          <option value="">Seciniz</option>
+                          {(field.options ?? []).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </AdminSelect>
+                      </AdminField>
+                    );
+                  }
+                  return (
+                    <AdminField key={field.key} label={field.label}>
+                      <AdminInput
+                        type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                        value={String(currentValue ?? "")}
+                        disabled={!canManage}
+                        onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
+                      />
+                    </AdminField>
+                  );
+                })}
+              </div>
+            </AdminModal>
           ) : null}
+
+          <AdminConfirmDialog
+            open={Boolean(confirmDeleteId)}
+            title="Kaydı silmek istiyor musun?"
+            description="Bu işlem geri alınamaz."
+            confirmLabel="Sil"
+            cancelLabel="İptal"
+            busy={submitting}
+            onCancel={() => setConfirmDeleteId(null)}
+            onConfirm={() => {
+              const id = confirmDeleteId;
+              if (!id) return;
+              setConfirmDeleteId(null);
+              void handleDeleteById(id);
+            }}
+          />
         </>
       )}
     </div>

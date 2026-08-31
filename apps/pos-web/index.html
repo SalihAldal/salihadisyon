@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Adisyon POS Web</title>
+    <script>
+      window.__POS_API_BASE__ = window.location.origin + "/adisyon/api/v1";
+      window.__POS_SOCKET_PATH__ = "/adisyon/ws/socket.io";
+    </script>
   </head>
   <body>
     <div id="root"></div>

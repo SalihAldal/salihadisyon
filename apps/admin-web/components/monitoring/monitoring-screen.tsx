@@ -38,14 +38,12 @@ export function MonitoringScreen() {
   }
 
   return (
-    <div className="dashboard-stack admin-reference-page">
-      <section className="admin-page-intro">
-        <AdminPageHeader
-          kicker="Sistem Gozlemi"
-          title="Monitoring ve Alert"
-          description="Kritik API hatalarini erken yakala, alert gonderimlerini izle ve hata yogunlugunu analiz et."
-        />
-      </section>
+    <div className="admin-page-stack admin-reference-page">
+      <AdminPageHeader
+        kicker="Sistem Gozlemi"
+        title="Monitoring ve Alert"
+        description="Kritik API hatalarini erken yakala, alert gonderimlerini izle ve hata yogunlugunu analiz et."
+      />
 
       {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
 

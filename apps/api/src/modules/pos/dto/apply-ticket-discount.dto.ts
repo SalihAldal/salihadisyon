@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min, ValidateIf } from "class-validator";
 
 export class ApplyTicketDiscountDto {
   @IsOptional()
@@ -8,12 +8,26 @@ export class ApplyTicketDiscountDto {
   @IsString()
   discountType!: string;
 
+  @IsOptional()
+  @IsIn(["DISCOUNT", "COMP"])
+  discountKind?: "DISCOUNT" | "COMP";
+
   @IsString()
   label!: string;
 
+  @IsString()
+  reason!: string;
+
+  @ValidateIf((dto) => dto.percentage === undefined || dto.percentage === null)
   @IsNumber()
   @Min(0)
-  amount!: number;
+  amount?: number;
+
+  @ValidateIf((dto) => dto.amount === undefined || dto.amount === null)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  percentage?: number;
 
   @IsOptional()
   @IsBoolean()

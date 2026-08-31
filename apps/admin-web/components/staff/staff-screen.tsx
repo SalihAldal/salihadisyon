@@ -16,7 +16,9 @@ import { formatTrDateTimeSafe } from "../../lib/utils/admin-format";
 import { getValueByPath } from "../../lib/utils/object-path";
 import { formatJsonFieldForTextarea, formatReadableValue, normalizeJsonFieldsForSubmit } from "../../lib/utils/readable-value";
 import { EmployeeEditModal } from "./employee-editor/employee-edit-modal";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { IamRolesScreen } from "../iam/iam-roles-screen";
+import { getStoredUser, hasStoredPermission } from "../../lib/auth/session";
+import { AdminButton, AdminConfirmDialog, AdminField, AdminFilterPanel, AdminInput, AdminModal, AdminPageHeader, AdminPagination, AdminRowActionMenu, AdminSelect, AdminStateCard, AdminStatusBadge, AdminSwitchField, AdminTableCard, AdminTableWrap, AdminTextarea } from "../ui/admin-ui";
 
 function resolveTaskTone(statusLabel: string) {
   if (statusLabel === "Tamamlandi") return "success";
@@ -26,7 +28,8 @@ function resolveTaskTone(statusLabel: string) {
 }
 
 export function StaffScreen({ slug }: { slug?: string }) {
-  const screen = useMemo(() => getStaffScreen(slug), [slug]);
+  const screen = useMemo(() => (slug === "personel-rolleri" ? null : getStaffScreen(slug)), [slug]);
+  const canManage = hasStoredPermission(getStoredUser(), "staff.manage");
   const [meta, setMeta] = useState<StaffMetaResponse | null>(null);
   const [list, setList] = useState<StaffListResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(screen));
@@ -38,6 +41,8 @@ export function StaffScreen({ slug }: { slug?: string }) {
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function refreshList(resource: string, nextFilters: Record<string, string>, nextPage: number, nextLimit: number) {
     const listResponse = await fetchStaffList(resource, {
@@ -207,15 +212,36 @@ export function StaffScreen({ slug }: { slug?: string }) {
     }
   }
 
+  async function handleDeleteById(id: string) {
+    if (!screen) return;
+    setSubmitting(true);
+    try {
+      await deleteStaffItem(screen.resource, id);
+      if (selectedId === id) {
+        setSelectedId(null);
+        setFormData({});
+        setIsFormModalOpen(false);
+      }
+      await refreshList(screen.resource, filters, page, limit);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Silme islemi basarisiz.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (slug === "personel-rolleri") {
+    return <IamRolesScreen />;
+  }
+
   if (!screen) {
     return (
-      <div className="dashboard-stack">
-        <section className="admin-page-intro">
-          <div>
-            <p className="admin-kicker">Sprint 4 / Personel Yonetimi</p>
-            <h3>Tum personel modulleri tek merkezden yonetilir</h3>
-          </div>
-        </section>
+      <div className="admin-page-stack admin-pos-settings-page admin-staff-page">
+        <AdminPageHeader
+          kicker="Personel"
+          title="Personel Yonetimi"
+          description="Ekip, vardiya, izin, gorev ve bildirim akisini tek merkezden yonetin."
+        />
         <section className="admin-module-grid">
           {staffScreens.map((item) => (
             <Link key={item.slug} href={`/personel/${item.slug}`} className="admin-module-card">
@@ -233,7 +259,7 @@ export function StaffScreen({ slug }: { slug?: string }) {
   if (error && !meta) return <AdminStateCard message={error} tone="danger" />;
 
   return (
-    <div className={`dashboard-stack admin-pos-settings-page admin-staff-page admin-staff-page--${screen.resource}`}>
+    <div className={`admin-page-stack admin-pos-settings-page admin-staff-page admin-staff-page--${screen.resource}`}>
       <section className="admin-pos-settings-nav">
         <div className="admin-pos-settings-nav__row">
           {staffScreens.map((item) => (
@@ -249,12 +275,14 @@ export function StaffScreen({ slug }: { slug?: string }) {
         className="admin-staff-toolbar"
         actions={
           <>
-            <button className="admin-outline-button" type="button" onClick={() => void refreshList(screen.resource, filters, page, limit)}>
+            <AdminButton variant="outline" onClick={() => void refreshList(screen.resource, filters, page, limit)}>
               Yenile
-            </button>
-            <button className="admin-primary-button" type="button" onClick={handleNew}>
-              Yeni Kayit
-            </button>
+            </AdminButton>
+            {screen && canManage ? (
+              <AdminButton variant="primary" onClick={handleNew}>
+                Yeni Kayit
+              </AdminButton>
+            ) : null}
           </>
         }
       />
@@ -263,10 +291,9 @@ export function StaffScreen({ slug }: { slug?: string }) {
         <AdminFilterPanel title="Personel filtreleri" className="admin-pos-settings-filters">
           <div className="admin-form-grid">
             {meta.filters.map((filter) => (
-              <label key={filter.key} className="admin-field">
-                <span>{filter.label}</span>
+              <AdminField key={filter.key} label={filter.label}>
                 {filter.type === "select" ? (
-                  <select
+                  <AdminSelect
                     value={filters[filter.key] ?? ""}
                     onChange={(event) => {
                       setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
@@ -279,9 +306,9 @@ export function StaffScreen({ slug }: { slug?: string }) {
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </AdminSelect>
                 ) : filter.type === "date" ? (
-                  <input
+                  <AdminInput
                     type="date"
                     value={filters[filter.key] ?? ""}
                     onChange={(event) => {
@@ -290,7 +317,7 @@ export function StaffScreen({ slug }: { slug?: string }) {
                     }}
                   />
                 ) : (
-                  <input
+                  <AdminInput
                     value={filters[filter.key] ?? ""}
                     onChange={(event) => {
                       setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
@@ -299,11 +326,10 @@ export function StaffScreen({ slug }: { slug?: string }) {
                     placeholder={`${filter.label} ile filtrele`}
                   />
                 )}
-              </label>
+              </AdminField>
             ))}
-            <label className="admin-field">
-              <span>Sayfa Boyutu</span>
-              <select
+            <AdminField label="Sayfa Boyutu">
+              <AdminSelect
                 value={String(limit)}
                 onChange={(event) => {
                   setLimit(Number(event.target.value));
@@ -313,8 +339,8 @@ export function StaffScreen({ slug }: { slug?: string }) {
                 <option value="20">20</option>
                 <option value="50">50</option>
                 <option value="100">100</option>
-              </select>
-            </label>
+              </AdminSelect>
+            </AdminField>
           </div>
         </AdminFilterPanel>
       ) : null}
@@ -326,22 +352,12 @@ export function StaffScreen({ slug }: { slug?: string }) {
           title={`${screen.title} Kayitlari`}
           badge={<AdminStatusBadge tone="info">{list?.pagination.total ?? 0} toplam</AdminStatusBadge>}
           footer={
-            <div className="admin-filter-actions">
-              <button className="admin-outline-button" type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={(list?.pagination.page ?? 1) <= 1}>
-                Onceki
-              </button>
-              <AdminStatusBadge tone="info">
-                Sayfa {list?.pagination.page ?? 1} / {list?.pagination.totalPages ?? 1}
-              </AdminStatusBadge>
-              <button
-                className="admin-outline-button"
-                type="button"
-                onClick={() => setPage((current) => current + 1)}
-                disabled={(list?.pagination.page ?? 1) >= (list?.pagination.totalPages ?? 1)}
-              >
-                Sonraki
-              </button>
-            </div>
+            <AdminPagination
+              page={list?.pagination.page ?? 1}
+              totalPages={list?.pagination.totalPages ?? 1}
+              onPrev={() => setPage((current) => Math.max(1, current - 1))}
+              onNext={() => setPage((current) => current + 1)}
+            />
           }
         >
 
@@ -378,8 +394,16 @@ export function StaffScreen({ slug }: { slug?: string }) {
                               <td>{formatTrDateTimeSafe(typeof item.scheduledStartAt === "string" ? item.scheduledStartAt : null, "-", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
                               <td>{formatTrDateTimeSafe(typeof item.scheduledEndAt === "string" ? item.scheduledEndAt : null, "-", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
                               <td>{String(item.totalBreakMinutes ?? 0)} dk</td>
-                              <td>
-                                <span className="admin-row-actions">✎ · 🗑</span>
+                              <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                                <AdminRowActionMenu
+                                  open={actionMenuRowId === rowId}
+                                  onToggle={() => setActionMenuRowId((current) => (current === rowId ? null : rowId))}
+                                  onClose={() => setActionMenuRowId(null)}
+                                  items={[
+                                    { key: "edit", label: "Düzenle", onSelect: () => void handleSelect(rowId) },
+                                    { key: "delete", label: "Sil", tone: "danger", onSelect: () => setConfirmDeleteId(rowId) },
+                                  ]}
+                                />
                               </td>
                             </tr>
                           );
@@ -473,8 +497,16 @@ export function StaffScreen({ slug }: { slug?: string }) {
                           }
                           return <td key={column.key}>{String(formatReadableValue(getValueByPath(record, column.key)))}</td>;
                         })}
-                        <td>
-                          <span className="admin-row-actions">✎ · 🗑</span>
+                        <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                          <AdminRowActionMenu
+                            open={actionMenuRowId === rowId}
+                            onToggle={() => setActionMenuRowId((current) => (current === rowId ? null : rowId))}
+                            onClose={() => setActionMenuRowId(null)}
+                            items={[
+                              { key: "edit", label: "Düzenle", onSelect: () => void handleSelect(rowId) },
+                              { key: "delete", label: "Sil", tone: "danger", onSelect: () => setConfirmDeleteId(rowId) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -495,94 +527,107 @@ export function StaffScreen({ slug }: { slug?: string }) {
             onRefreshList={() => refreshList(screen.resource, filters, page, limit)}
           />
         ) : (
-          <div className="admin-modal-backdrop" onClick={handleCloseModal}>
-            <section className="admin-modal-card" onClick={(event) => event.stopPropagation()}>
-              <div className="admin-section-head">
-                <div>
-                  <p className="admin-kicker">Form</p>
-                  <h3>{selectedId ? "Detay / Guncelle" : "Yeni Kayit"}</h3>
+          <AdminModal
+            open={isFormModalOpen}
+            size="lg"
+            kicker="Personel"
+            title={selectedId ? "Kayıt Düzenle" : "Yeni Kayıt"}
+            onClose={handleCloseModal}
+            closeDisabled={submitting}
+            footer={
+              <div className="admin-modal__footer-content">
+                <div className="admin-modal__footer-left">
+                  <AdminButton variant="text" onClick={handleCloseModal} disabled={submitting}>
+                    Vazgeç
+                  </AdminButton>
+                  {selectedId ? (
+                    <AdminButton variant="outline" className="admin-outline-button--danger" onClick={() => setConfirmDeleteId(selectedId)} disabled={submitting || !canManage} loading={submitting}>
+                      Kaydı Sil
+                    </AdminButton>
+                  ) : null}
                 </div>
-                <button className="admin-outline-button" type="button" onClick={handleCloseModal}>
-                  Kapat
-                </button>
+                <div className="admin-modal__footer-right">
+                  <AdminButton variant="primary" disabled={submitting || !canManage} onClick={handleSubmit} loading={submitting}>
+                    {submitting ? "Kaydediliyor..." : selectedId ? "Güncelle" : "Oluştur"}
+                  </AdminButton>
+                </div>
               </div>
-
-              <div className="admin-form-grid">
-                {meta?.fields.map((field) => {
-                  const currentValue = formData[field.key];
-                  if (field.type === "textarea") {
-                    return (
-                      <label key={field.key} className="admin-field admin-field--full">
-                        <span>{field.label}</span>
-                        <textarea value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
-                      </label>
-                    );
-                  }
-                  if (field.type === "json") {
-                    return (
-                      <label key={field.key} className="admin-field admin-field--full">
-                        <span>{field.label}</span>
-                        <textarea
-                          value={formatJsonFieldForTextarea(currentValue)}
-                          onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
-                          placeholder="Satir satir veya anahtar: deger formatinda girin"
-                        />
-                      </label>
-                    );
-                  }
-                  if (field.type === "switch") {
-                    return (
-                      <label key={field.key} className="admin-field">
-                        <span>{field.label}</span>
-                        <select value={String(currentValue ?? false)} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value === "true" }))}>
-                          <option value="true">Aktif</option>
-                          <option value="false">Pasif</option>
-                        </select>
-                      </label>
-                    );
-                  }
-                  if (field.type === "select") {
-                    return (
-                      <label key={field.key} className="admin-field">
-                        <span>{field.label}</span>
-                        <select value={String(currentValue ?? "")} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}>
-                          <option value="">Seciniz</option>
-                          {(field.options ?? []).map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    );
-                  }
+            }
+          >
+            <div className="admin-form-grid admin-form-grid--modal">
+              {meta?.fields.map((field) => {
+                const currentValue = formData[field.key];
+                const disabled = submitting || !canManage;
+                if (field.type === "textarea") {
                   return (
-                    <label key={field.key} className="admin-field">
-                      <span>{field.label}</span>
-                      <input
-                        type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
-                        value={String(currentValue ?? "")}
-                        onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
-                      />
-                    </label>
+                    <AdminField key={field.key} label={field.label} fullWidth>
+                      <AdminTextarea value={String(currentValue ?? "")} disabled={disabled} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
+                    </AdminField>
                   );
-                })}
-              </div>
-
-              <div className="admin-filter-actions">
-                {selectedId ? (
-                  <button className="admin-outline-button" type="button" onClick={handleDelete} disabled={submitting}>
-                    Kaydi Sil
-                  </button>
-                ) : null}
-                <button className="admin-primary-button" type="button" disabled={submitting} onClick={handleSubmit}>
-                  {submitting ? "Kaydediliyor..." : selectedId ? "Guncelle" : "Olustur"}
-                </button>
-              </div>
-            </section>
-          </div>
+                }
+                if (field.type === "json") {
+                  return (
+                    <AdminField key={field.key} label={field.label} fullWidth>
+                      <AdminTextarea value={formatJsonFieldForTextarea(currentValue)} disabled={disabled} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))} />
+                    </AdminField>
+                  );
+                }
+                if (field.type === "switch") {
+                  return (
+                    <AdminSwitchField
+                      key={field.key}
+                      label={field.label}
+                      checked={Boolean(currentValue)}
+                      disabled={disabled}
+                      onChange={(next) => setFormData((current) => ({ ...current, [field.key]: next }))}
+                    />
+                  );
+                }
+                if (field.type === "select") {
+                  return (
+                    <AdminField key={field.key} label={field.label}>
+                      <AdminSelect value={String(currentValue ?? "")} disabled={disabled} onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}>
+                        <option value="">Seçiniz</option>
+                        {(field.options ?? []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </AdminSelect>
+                    </AdminField>
+                  );
+                }
+                return (
+                  <AdminField key={field.key} label={field.label}>
+                    <AdminInput
+                      type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                      value={String(currentValue ?? "")}
+                      disabled={disabled}
+                      onChange={(event) => setFormData((current) => ({ ...current, [field.key]: event.target.value }))}
+                    />
+                  </AdminField>
+                );
+              })}
+            </div>
+          </AdminModal>
         )
       ) : null}
+
+      <AdminConfirmDialog
+        open={Boolean(confirmDeleteId)}
+        title="Kaydı silmek istiyor musun?"
+        description="Bu işlem geri alınamaz."
+        confirmLabel="Sil"
+        cancelLabel="İptal"
+        busy={submitting}
+        onCancel={() => setConfirmDeleteId(null)}
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          if (!id) return;
+          setConfirmDeleteId(null);
+          void handleDeleteById(id);
+        }}
+      />
     </div>
   );
 }

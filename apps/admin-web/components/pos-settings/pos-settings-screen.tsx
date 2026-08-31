@@ -16,7 +16,27 @@ import {
 import { formatTryCurrency } from "../../lib/utils/admin-format";
 import { getValueByPath } from "../../lib/utils/object-path";
 import { formatJsonFieldForTextarea, formatReadableValue, normalizeJsonFieldsForSubmit } from "../../lib/utils/readable-value";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import {
+  AdminConfirmDialog,
+  AdminFilterPanel,
+  AdminButton,
+  AdminField,
+  AdminInput,
+  AdminModal,
+  AdminPageHeader,
+  AdminPagination,
+  AdminRowActionMenu,
+  AdminStateCard,
+  AdminStatusBadge,
+  AdminSwitchField,
+  AdminTabs,
+  AdminTableCard,
+  AdminTableWrap,
+  AdminSelect,
+  AdminTextarea,
+} from "../ui/admin-ui";
+import { AdminIcon } from "../ui/admin-icons";
+import { PosSettingsShell } from "./pos-settings-shell";
 
 function normalizeDateTimeValue(value: unknown) {
   if (!value || typeof value !== "string") return "";
@@ -115,9 +135,12 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailMode, setDetailMode] = useState<"detail" | "edit" | "create">("edit");
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const groupedFields = useMemo(() => {
     const result = new Map<string, NonNullable<PosSettingsMetaResponse["fields"]>>();
@@ -138,6 +161,29 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
   );
   const isMenuProductResource = screen?.resource === "menu-management" || screen?.resource === "menu-products";
   const isMenuCategoryResource = screen?.resource === "menu-categories";
+  const isCalibrationResource = isMenuProductResource || isMenuCategoryResource;
+
+  const productTabs = useMemo(() => {
+    if (!isMenuProductResource) return [];
+    return [
+      { key: "base", label: "Temel Bilgiler" },
+      { key: "pricing", label: "Fiyatlandırma" },
+      { key: "channels", label: "Kanal Ayarları" },
+      { key: "stock", label: "Stok & Reçete" },
+      { key: "advanced", label: "Ek Bilgiler" },
+    ] as const;
+  }, [isMenuProductResource]);
+
+  function resolveProductTabKey(section: string) {
+    const normalized = String(section ?? "").toLowerCase();
+    if (normalized.includes("temel")) return "base";
+    if (normalized.includes("fiyat") || normalized.includes("kdv") || normalized.includes("maliyet")) return "pricing";
+    if (normalized.includes("kanal") || normalized.includes("pos") || normalized.includes("qr") || normalized.includes("aktif")) return "channels";
+    if (normalized.includes("stok") || normalized.includes("reçete") || normalized.includes("recete")) return "stock";
+    return "advanced";
+  }
+
+  const [activeProductTab, setActiveProductTab] = useState<"base" | "pricing" | "channels" | "stock" | "advanced">("base");
 
   const resourcePermissions = useMemo(() => {
     if (!screen) {
@@ -318,13 +364,26 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
     };
   }, [screen, debouncedFilters, page, limit]);
 
-  async function handleSelect(id: string) {
+  useEffect(() => {
+    if (!actionMenuRowId) return;
+    const close = () => setActionMenuRowId(null);
+    window.addEventListener("click", close, { capture: true });
+    window.addEventListener("scroll", close, { capture: true });
+    return () => {
+      window.removeEventListener("click", close, { capture: true } as any);
+      window.removeEventListener("scroll", close, { capture: true } as any);
+    };
+  }, [actionMenuRowId]);
+
+  async function handleSelect(id: string, mode: "detail" | "edit" = "edit") {
     if (!screen) return;
     try {
       setError(null);
+      setDetailMode(mode);
       const detail = await fetchPosSettingsDetail(screen.resource, id);
       setSelectedId(id);
       setFormData(detail);
+      setActiveProductTab("base");
       setIsFormModalOpen(true);
     } catch (detailError) {
       setError(detailError instanceof Error ? detailError.message : "Detay getirilemedi.");
@@ -333,13 +392,16 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
 
   function handleNew() {
     setSelectedId(null);
+    setDetailMode("create");
     setFormData(isMenuProductResource ? getMenuProductDefaults() : {});
+    setActiveProductTab("base");
     setIsFormModalOpen(true);
   }
 
   function handleCloseModal() {
     if (submitting) return;
     setIsFormModalOpen(false);
+    setDetailMode("edit");
   }
 
   async function handleSubmit() {
@@ -381,6 +443,25 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
       setSelectedId(null);
       setFormData({});
       setIsFormModalOpen(false);
+      await refreshList(screen.resource, filters, page, limit);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Silme islemi basarisiz.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteById(id: string) {
+    if (!screen) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await deletePosSettingsItem(screen.resource, id);
+      if (selectedId === id) {
+        setSelectedId(null);
+        setFormData({});
+        setIsFormModalOpen(false);
+      }
       await refreshList(screen.resource, filters, page, limit);
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Silme islemi basarisiz.");
@@ -463,23 +544,23 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
 
   if (!screen) {
     return (
-      <div className="dashboard-stack">
-        <section className="admin-page-intro">
-          <div>
-            <p className="admin-kicker">Sprint 3 / POS Ayarlari</p>
-            <h3>Tum POS ayar modulleri tek merkezden yonetilir</h3>
-          </div>
-        </section>
-
-        <section className="admin-module-grid">
-          {posSettingsScreens.map((item) => (
-            <Link key={item.slug} href={`/pos-ayarlari/${item.slug}`} className="admin-module-card">
-              <p className="admin-kicker">POS Ayarlari</p>
-              <h3>{item.title}</h3>
-              <p className="admin-subtle-text">{item.description}</p>
-            </Link>
-          ))}
-        </section>
+      <div className="admin-page-stack admin-pos-settings-page">
+        <AdminPageHeader
+          kicker="POS Ayarlari"
+          title="POS Ayarlari"
+          description="Menu, satis, servis ve cihaz ayarlarinizi tek merkezden yonetin."
+        />
+        <PosSettingsShell activeSlug={null}>
+            <section className="admin-module-grid">
+              {posSettingsScreens.map((item) => (
+                <Link key={item.slug} href={`/pos-ayarlari/${item.slug}`} className="admin-module-card">
+                  <p className="admin-kicker">POS Ayarlari</p>
+                  <h3>{item.title}</h3>
+                  <p className="admin-subtle-text">{item.description}</p>
+                </Link>
+              ))}
+            </section>
+        </PosSettingsShell>
       </div>
     );
   }
@@ -497,442 +578,736 @@ export function PosSettingsScreen({ slug }: { slug?: string }) {
   }
 
   return (
-    <div className="dashboard-stack admin-pos-settings-page">
-      <section className="admin-pos-settings-nav">
-        <div className="admin-pos-settings-nav__row">
-          {posSettingsScreens.map((item) => (
-            <Link
-              key={item.slug}
-              href={`/pos-ayarlari/${item.slug}`}
-              className={`admin-chip ${item.slug === screen.slug ? "admin-chip--active" : ""}`}
-            >
-              {item.title}
-            </Link>
-          ))}
-        </div>
-      </section>
-
+    <div className="admin-page-stack admin-pos-settings-page">
       <AdminPageHeader
+        kicker="Pano > POS Ayarlari"
         title={screen.title}
+        description={screen.description}
         className="admin-pos-settings-toolbar"
         actions={
           <>
-            <button className="admin-outline-button" type="button" onClick={() => void refreshList(screen.resource, filters, page, limit)}>
+            <AdminButton variant="outline" onClick={() => void refreshList(screen.resource, filters, page, limit)}>
               Yenile
-            </button>
+            </AdminButton>
             {screen.resource === "table-sections" ? (
               <>
-                <button className="admin-outline-button" type="button" onClick={() => void handleSeedDefaultTables()} disabled={submitting || !resourcePermissions.canManage}>
+                <AdminButton variant="outline" onClick={() => void handleSeedDefaultTables()} disabled={submitting || !resourcePermissions.canManage} loading={submitting}>
                   3 Kat M1-M20 Olustur
-                </button>
-                <button className="admin-outline-button" type="button" onClick={() => void handleClearDefaultTables()} disabled={submitting || !resourcePermissions.canManage}>
+                </AdminButton>
+                <AdminButton variant="outline" onClick={() => void handleClearDefaultTables()} disabled={submitting || !resourcePermissions.canManage} loading={submitting}>
                   M1-M20 Kalibini Sil
-                </button>
+                </AdminButton>
               </>
             ) : null}
-            <button className="admin-primary-button" type="button" onClick={handleNew} disabled={!resourcePermissions.canManage}>
-              Yeni Kayit
-            </button>
+            <AdminButton variant="primary" onClick={handleNew} disabled={!resourcePermissions.canManage}>
+              {screen.resource === "menu-products" ? "Yeni Ürün" : screen.resource === "menu-categories" ? "Yeni Kategori" : "Yeni Kayıt"}
+            </AdminButton>
           </>
         }
       />
 
-      {meta ? (
-        <AdminFilterPanel title="Liste filtreleri" className="admin-pos-settings-filters">
-          <div className="admin-form-grid">
-            {meta.filters.map((filter) => (
-              <label key={filter.key} className="admin-field">
-                <span>{filter.label}</span>
-                {filter.type === "select" ? (
-                  <select
-                    value={filters[filter.key] ?? ""}
+      {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
+
+      <PosSettingsShell
+        activeSlug={screen.slug}
+        aside={
+          isCalibrationResource && meta ? (
+            <AdminFilterPanel
+              title="Filtreler"
+              description="Listeyi hızlıca daralt."
+              className="admin-filter-panel--sidebar"
+              actions={
+                <AdminButton variant="outline" onClick={() => setFilters({})}>
+                  Temizle
+                </AdminButton>
+              }
+            >
+              <div className="admin-form-grid">
+                {meta.filters.map((filter) => (
+                  <AdminField key={filter.key} label={filter.label}>
+                    {filter.type === "select" ? (
+                      <AdminSelect
+                        value={filters[filter.key] ?? ""}
+                        onChange={(event) => {
+                          setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                          setPage(1);
+                        }}
+                      >
+                        <option value="">Tum Kayitlar</option>
+                        {(filter.options ?? []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </AdminSelect>
+                    ) : (
+                      <AdminInput
+                        value={filters[filter.key] ?? ""}
+                        onChange={(event) => {
+                          setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                          setPage(1);
+                        }}
+                        placeholder={`${filter.label} ile filtrele`}
+                      />
+                    )}
+                  </AdminField>
+                ))}
+                <AdminField label="Sayfa Boyutu">
+                  <AdminSelect
+                    value={String(limit)}
                     onChange={(event) => {
-                      setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                      setLimit(Number(event.target.value));
                       setPage(1);
                     }}
                   >
-                    <option value="">Tum Kayitlar</option>
-                    {(filter.options ?? []).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    value={filters[filter.key] ?? ""}
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </AdminSelect>
+                </AdminField>
+              </div>
+            </AdminFilterPanel>
+          ) : null
+        }
+      >
+          {isCalibrationResource ? null : meta ? (
+            <AdminFilterPanel title="Liste filtreleri" className="admin-pos-settings-filters">
+              <div className="admin-form-grid">
+                {meta.filters.map((filter) => (
+                  <AdminField key={filter.key} label={filter.label}>
+                    {filter.type === "select" ? (
+                      <AdminSelect
+                        value={filters[filter.key] ?? ""}
+                        onChange={(event) => {
+                          setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                          setPage(1);
+                        }}
+                      >
+                        <option value="">Tum Kayitlar</option>
+                        {(filter.options ?? []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </AdminSelect>
+                    ) : (
+                      <AdminInput
+                        value={filters[filter.key] ?? ""}
+                        onChange={(event) => {
+                          setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                          setPage(1);
+                        }}
+                        placeholder={`${filter.label} ile filtrele`}
+                      />
+                    )}
+                  </AdminField>
+                ))}
+                <AdminField label="Sayfa Boyutu">
+                  <AdminSelect
+                    value={String(limit)}
                     onChange={(event) => {
-                      setFilters((current) => ({ ...current, [filter.key]: event.target.value }));
+                      setLimit(Number(event.target.value));
                       setPage(1);
                     }}
-                    placeholder={`${filter.label} ile filtrele`}
-                  />
-                )}
-              </label>
-            ))}
-            <label className="admin-field">
-              <span>Sayfa Boyutu</span>
-              <select
-                value={String(limit)}
-                onChange={(event) => {
-                  setLimit(Number(event.target.value));
-                  setPage(1);
-                }}
-              >
-                <option value="20">20</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
-          </div>
-        </AdminFilterPanel>
-      ) : null}
+                  >
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </AdminSelect>
+                </AdminField>
+              </div>
+            </AdminFilterPanel>
+          ) : null}
 
-      {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
+          <AdminTableCard
+            title={`${screen.title} Kayitlari`}
+            badge={<AdminStatusBadge tone="info">{list?.pagination.total ?? 0} toplam</AdminStatusBadge>}
+            footer={
+              <AdminPagination
+                page={list?.pagination.page ?? 1}
+                totalPages={list?.pagination.totalPages ?? 1}
+                onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                onNext={() => setPage((current) => current + 1)}
+              />
+            }
+          >
+            <AdminTableWrap>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    {meta?.columns.map((column) => (
+                      <th key={column.key}>{column.label}</th>
+                    ))}
+                    {resourcePermissions.canManage ? <th className="admin-th--actions">İşlemler</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(list?.items ?? []).map((item) => {
+                    const record = item as Record<string, unknown>;
+                    const rowId = String(record.id);
+                    return (
+                      <tr
+                        key={rowId}
+                        onClick={() => handleSelect(rowId, "edit")}
+                        className={`admin-table__row--clickable ${selectedId === rowId ? "is-selected" : ""}`}
+                      >
+                        {meta?.columns.map((column) => {
+                          const value = getValueByPath(record, column.key);
 
-      <section className="admin-detail-grid admin-detail-grid--single">
-        <AdminTableCard
-          title={`${screen.title} Kayitlari`}
-          badge={<AdminStatusBadge tone="info">{list?.pagination.total ?? 0} toplam</AdminStatusBadge>}
+                          if (isMenuProductResource && ["isActive", "showInQr"].includes(column.key)) {
+                            return (
+                              <td key={column.key}>
+                                <AdminStatusBadge tone={value ? "success" : "neutral"}>{value ? "Acik" : "Kapali"}</AdminStatusBadge>
+                              </td>
+                            );
+                          }
+
+                          if (isMenuProductResource && ["visibilityLabel", "stockTrackingLabel", "recipeStatus"].includes(column.key)) {
+                            const tone =
+                              column.key === "visibilityLabel"
+                                ? value === "Gorunur"
+                                  ? "success"
+                                  : "warning"
+                                : column.key === "recipeStatus"
+                                  ? value === "Bagli"
+                                    ? "info"
+                                    : "neutral"
+                                  : value === "Takipli"
+                                    ? "info"
+                                    : "neutral";
+                            return (
+                              <td key={column.key}>
+                                <AdminStatusBadge tone={tone as "success" | "warning" | "info" | "neutral"}>{String(value ?? "-")}</AdminStatusBadge>
+                              </td>
+                            );
+                          }
+
+                          if (isMenuProductResource && ["basePrice", "currentCost", "theoreticalCost"].includes(column.key)) {
+                            const amount = Number(value ?? 0);
+                            return (
+                              <td key={column.key} className="admin-td--num">
+                                {Number.isFinite(amount) ? formatTryCurrency(amount, { maximumFractionDigits: 2 }) : "-"}
+                              </td>
+                            );
+                          }
+
+                          return <td key={column.key}>{String(formatReadableValue(value))}</td>;
+                        })}
+                        {resourcePermissions.canManage ? (
+                          <td className="admin-td--actions" onClick={(event) => event.stopPropagation()}>
+                            <AdminRowActionMenu
+                              open={actionMenuRowId === rowId}
+                              onToggle={() => setActionMenuRowId((current) => (current === rowId ? null : rowId))}
+                              onClose={() => setActionMenuRowId(null)}
+                              items={[
+                                  {
+                                    key: "detail",
+                                    label: "Detay",
+                                    onSelect: () => {
+                                      void handleSelect(rowId, "detail");
+                                    },
+                                  },
+                                {
+                                  key: "edit",
+                                  label: "Düzenle",
+                                  onSelect: () => {
+                                      void handleSelect(rowId, "edit");
+                                  },
+                                },
+                                {
+                                  key: "delete",
+                                  label: "Sil",
+                                  tone: "danger",
+                                  onSelect: () => setConfirmDeleteId(rowId),
+                                },
+                              ]}
+                            />
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </AdminTableWrap>
+          </AdminTableCard>
+      </PosSettingsShell>
+
+      {isFormModalOpen ? (
+        <AdminModal
+          open={isFormModalOpen}
+          size={isMenuProductResource ? "lg" : "md"}
+          icon={<AdminIcon name={isMenuProductResource ? "package" : isMenuCategoryResource ? "badge-percent" : "settings-2"} size={18} />}
+          kicker={isMenuProductResource ? "Menü / Ürün" : isMenuCategoryResource ? "Menü / Kategori" : "Kayıt"}
+          title={
+            isMenuProductResource
+              ? selectedId
+                ? detailMode === "detail"
+                  ? "Ürün Detay"
+                  : "Ürün Düzenle"
+                : "Yeni Ürün"
+              : isMenuCategoryResource
+                ? selectedId
+                  ? detailMode === "detail"
+                    ? "Kategori Detay"
+                    : "Kategori Düzenle"
+                  : "Yeni Kategori"
+                : selectedId
+                  ? "Detay / Güncelle"
+                  : "Yeni Kayıt"
+          }
+          description={
+            isMenuProductResource
+              ? formData.name
+                ? String(formData.name)
+                : undefined
+              : isMenuCategoryResource
+                ? formData.name
+                  ? String(formData.name)
+                  : undefined
+                : undefined
+          }
+          subHeader={
+            isMenuProductResource ? <div className="admin-modal__tabs"><AdminTabs items={productTabs} active={activeProductTab} onChange={setActiveProductTab} /></div> : null
+          }
+          onClose={handleCloseModal}
+          closeDisabled={submitting}
           footer={
-            <div className="admin-filter-actions">
-              <button
-                className="admin-outline-button"
-                type="button"
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                disabled={(list?.pagination.page ?? 1) <= 1}
-              >
-                Onceki
-              </button>
-              <AdminStatusBadge tone="info">
-                Sayfa {list?.pagination.page ?? 1} / {list?.pagination.totalPages ?? 1}
-              </AdminStatusBadge>
-              <button
-                className="admin-outline-button"
-                type="button"
-                onClick={() => setPage((current) => current + 1)}
-                disabled={(list?.pagination.page ?? 1) >= (list?.pagination.totalPages ?? 1)}
-              >
-                Sonraki
-              </button>
+            <div className="admin-modal__footer-content">
+              <div className="admin-modal__footer-left">
+                <AdminButton variant="text" onClick={handleCloseModal} disabled={submitting}>
+                  {detailMode === "detail" ? "Kapat" : "Vazgec"}
+                </AdminButton>
+                {selectedId && detailMode !== "detail" ? (
+                  <AdminButton variant="outline" className="admin-outline-button--danger" onClick={handleDelete} disabled={submitting || !resourcePermissions.canManage} loading={submitting}>
+                    Kaydi Sil
+                  </AdminButton>
+                ) : null}
+              </div>
+              <div className="admin-modal__footer-right">
+                {detailMode !== "detail" ? (
+                  <AdminButton variant="primary" disabled={submitting || !resourcePermissions.canManage} onClick={handleSubmit} loading={submitting}>
+                    {submitting ? "Kaydediliyor..." : selectedId ? "Guncelle" : "Olustur"}
+                  </AdminButton>
+                ) : null}
+              </div>
             </div>
           }
         >
+          {isMenuProductResource ? (
+                <>
+                  {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
 
-          <AdminTableWrap>
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  {meta?.columns.map((column) => (
-                    <th key={column.key}>{column.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(list?.items ?? []).map((item) => {
-                  const record = item as Record<string, unknown>;
-                  return (
-                    <tr key={String(record.id)} onClick={() => handleSelect(String(record.id))} className="admin-table__row--clickable">
-                      {meta?.columns.map((column) => {
-                        const value = getValueByPath(record, column.key);
-
-                        if (isMenuProductResource && ["isActive", "showInQr"].includes(column.key)) {
-                          return (
-                            <td key={column.key}>
-                              <AdminStatusBadge tone={value ? "success" : "neutral"}>{value ? "Acik" : "Kapali"}</AdminStatusBadge>
-                            </td>
-                          );
-                        }
-
-                        if (isMenuProductResource && ["visibilityLabel", "stockTrackingLabel", "recipeStatus"].includes(column.key)) {
-                          const tone =
-                            column.key === "visibilityLabel"
-                              ? value === "Gorunur"
-                                ? "success"
-                                : "warning"
-                              : column.key === "recipeStatus"
-                                ? value === "Bagli"
-                                  ? "info"
-                                  : "neutral"
-                                : value === "Takipli"
-                                  ? "info"
-                                  : "neutral";
-                          return (
-                            <td key={column.key}>
-                              <AdminStatusBadge tone={tone as "success" | "warning" | "info" | "neutral"}>{String(value ?? "-")}</AdminStatusBadge>
-                            </td>
-                          );
-                        }
-
-                        if (isMenuProductResource && ["basePrice", "currentCost", "theoreticalCost"].includes(column.key)) {
-                          const amount = Number(value ?? 0);
-                          return (
-                            <td key={column.key}>
-                              {Number.isFinite(amount) ? formatTryCurrency(amount, { maximumFractionDigits: 2 }) : "-"}
-                            </td>
-                          );
-                        }
-
-                        return <td key={column.key}>{String(formatReadableValue(value))}</td>;
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </AdminTableWrap>
-        </AdminTableCard>
-      </section>
-
-      {isFormModalOpen ? (
-        <div className="admin-modal-backdrop" onClick={handleCloseModal}>
-          <section className="admin-modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="admin-section-head">
-              <div>
-                <p className="admin-kicker">Form</p>
-                <h3>{selectedId ? "Detay / Guncelle" : "Yeni Kayit"}</h3>
-              </div>
-              <button className="admin-outline-button" type="button" onClick={handleCloseModal}>
-                Kapat
-              </button>
-            </div>
-
-            <div className="admin-form-sections">
-              {groupedFields.map(([section, fields]) => (
-                <section key={section} className="admin-form-section">
-                  <div className="admin-section-head admin-section-head--compact">
-                    <div>
-                      <p className="admin-kicker">Urun Formu</p>
-                      <h3>{section}</h3>
-                    </div>
-                  </div>
-                  {isMenuProductResource && section === "Temel Bilgiler" && formData.imageUrl ? (
+                  {activeProductTab === "base" && formData.imageUrl ? (
                     <div className="admin-product-image-preview">
                       <img src={String(formData.imageUrl)} alt={String(formData.name ?? "Urun gorseli")} />
                     </div>
                   ) : null}
-                  <div className="admin-form-grid">
-                    {fields.map((field) => {
-                      const currentValue = formData[field.key];
 
-                      if (isMenuProductResource && field.key === "stockItemId" && !formData.stockTracked) {
-                        return null;
-                      }
-
-                      if (isMenuProductResource && field.key === "recipeItemsJson" && !formData.recipeEnabled) {
-                        return null;
-                      }
-
-                      const isReadOnlyField =
-                        !resourcePermissions.canManage ||
-                        ((field.key === "basePrice" || field.key === "currentCost") && !resourcePermissions.canManagePrice);
-
-                      if (field.type === "textarea") {
-                        return (
-                          <label key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                            <span>{field.label}</span>
-                            <textarea
-                              value={String(currentValue ?? "")}
-                              placeholder={field.placeholder}
-                              disabled={isReadOnlyField}
-                              onChange={(event) => handleFieldChange(field.key, event.target.value)}
-                            />
-                            {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
-                          </label>
-                        );
-                      }
-
-                      if (isMenuProductResource && field.key === "recipeItemsJson") {
-                        const recipeItems = normalizeRecipeEditorItems(currentValue);
-                        const theoreticalCost = recipeItems.reduce((sum, recipeItem) => {
-                          const selectedItem = inventoryFieldOptions.find((option) => option.value === recipeItem.inventoryItemId);
-                          const unitCost = Number(selectedItem?.meta?.latestUnitCost ?? 0);
-                          const quantity = Number(recipeItem.quantity ?? 0);
-                          return sum + (Number.isFinite(quantity) ? quantity : 0) * unitCost;
-                        }, 0);
-
-                        return (
-                          <div key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                            <span>{field.label}</span>
-                            <div className="admin-recipe-editor">
-                              {recipeItems.length ? (
-                                <div className="admin-recipe-editor__rows">
-                                  {recipeItems.map((recipeItem, index) => {
-                                    const selectedItem = inventoryFieldOptions.find((option) => option.value === recipeItem.inventoryItemId);
-                                    return (
-                                      <div key={`${field.key}-${index}`} className="admin-recipe-editor__row">
-                                        <label className="admin-recipe-editor__field">
-                                          <span>Hammadde</span>
-                                          <select
-                                            value={recipeItem.inventoryItemId}
-                                            disabled={isReadOnlyField}
-                                            onChange={(event) => {
-                                              const nextRecipeItems = recipeItems.map((row, rowIndex) =>
-                                                rowIndex === index ? { ...row, inventoryItemId: event.target.value } : row,
-                                              );
-                                              handleFieldChange(field.key, nextRecipeItems);
-                                            }}
-                                          >
-                                            <option value="">Hammadde sec</option>
-                                            {inventoryFieldOptions.map((option) => (
-                                              <option key={option.value} value={option.value}>
-                                                {option.label}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        </label>
-                                        <label className="admin-recipe-editor__field admin-recipe-editor__field--quantity">
-                                          <span>Miktar</span>
-                                          <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={recipeItem.quantity}
-                                            disabled={isReadOnlyField}
-                                            onChange={(event) => {
-                                              const nextRecipeItems = recipeItems.map((row, rowIndex) =>
-                                                rowIndex === index ? { ...row, quantity: event.target.value } : row,
-                                              );
-                                              handleFieldChange(field.key, nextRecipeItems);
-                                            }}
-                                          />
-                                        </label>
-                                        <div className="admin-recipe-editor__meta">
-                                          <span className="admin-recipe-editor__unit">
-                                            {String(selectedItem?.meta?.unitSymbol ?? "-")}
-                                          </span>
-                                          <small>
-                                            Stok: {String(selectedItem?.meta?.currentStock ?? "-")} / Kritik:{" "}
-                                            {String(selectedItem?.meta?.minimumLevel ?? "-")}
-                                          </small>
-                                        </div>
-                                        <button
-                                          className="admin-outline-button"
-                                          type="button"
-                                          disabled={isReadOnlyField}
-                                          onClick={() => handleFieldChange(field.key, recipeItems.filter((_, rowIndex) => rowIndex !== index))}
-                                        >
-                                          Sil
-                                        </button>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="admin-recipe-editor__empty">
-                                  <p>Bu urun icin henuz recete satiri eklenmedi.</p>
-                                </div>
-                              )}
-
-                              <div className="admin-recipe-editor__footer">
-                                <button
-                                  className="admin-outline-button"
-                                  type="button"
-                                  disabled={isReadOnlyField}
-                                  onClick={() =>
-                                    handleFieldChange(field.key, [...recipeItems, { inventoryItemId: "", quantity: "" }])
-                                  }
-                                >
-                                  Hammadde Ekle
-                                </button>
-                                <div className="admin-recipe-editor__summary">
-                                  <span>Teorik maliyet</span>
-                                  <strong>
-                                    {formatTryCurrency(theoreticalCost, { maximumFractionDigits: 2 })}
-                                  </strong>
-                                </div>
-                              </div>
-                            </div>
-                            {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
+                  <div className="admin-form-sections admin-form-sections--flat">
+                    {groupedFields
+                      .filter(([section]) => resolveProductTabKey(section) === activeProductTab)
+                      .map(([section, fields]) => (
+                        <section key={section} className="admin-form-block">
+                          <div className="admin-form-block__head">
+                            <h4>{section}</h4>
                           </div>
-                        );
-                      }
+                          <div className="admin-form-grid admin-form-grid--modal">
+                            {fields.map((field) => {
+                              const currentValue = formData[field.key];
 
-                      if (field.type === "json") {
-                        return (
-                          <label key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                            <span>{field.label}</span>
-                            <textarea
-                              value={formatJsonFieldForTextarea(currentValue)}
-                              placeholder={field.placeholder || "Satir satir veya anahtar: deger formatinda girin"}
-                              disabled={isReadOnlyField}
-                              onChange={(event) => handleFieldChange(field.key, event.target.value)}
-                            />
-                            {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
-                          </label>
-                        );
-                      }
+                              if (isMenuProductResource && field.key === "stockItemId" && !formData.stockTracked) {
+                                return null;
+                              }
 
-                      if (field.type === "switch") {
-                        return (
-                          <label key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                            <span>{field.label}</span>
-                            <select
-                              value={String(currentValue ?? false)}
-                              disabled={isReadOnlyField}
-                              onChange={(event) => handleFieldChange(field.key, event.target.value === "true")}
-                            >
-                              <option value="true">Evet</option>
-                              <option value="false">Hayir</option>
-                            </select>
-                            {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
-                          </label>
-                        );
-                      }
+                              if (isMenuProductResource && field.key === "recipeItemsJson" && !formData.recipeEnabled) {
+                                return null;
+                              }
 
-                      if (field.type === "select") {
-                        const selectOptions =
-                          isMenuCategoryResource && field.key === "parentId" && selectedId
-                            ? (field.options ?? []).filter((option) => option.value !== selectedId)
-                            : (field.options ?? []);
-                        return (
-                          <label key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                            <span>{field.label}</span>
-                            <select value={String(currentValue ?? "")} disabled={isReadOnlyField} onChange={(event) => handleFieldChange(field.key, event.target.value)}>
-                              <option value="">Seciniz</option>
-                              {selectOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
-                          </label>
-                        );
-                      }
+                              const isReadOnlyField =
+                                detailMode === "detail" ||
+                                !resourcePermissions.canManage ||
+                                ((field.key === "basePrice" || field.key === "currentCost") && !resourcePermissions.canManagePrice);
 
-                      return (
-                        <label key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
-                          <span>{field.label}</span>
-                          <input
-                            type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
-                            value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
-                            placeholder={field.placeholder}
-                            disabled={isReadOnlyField}
-                            onChange={(event) => handleFieldChange(field.key, field.type === "number" ? event.target.value : event.target.value)}
-                          />
-                          {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
-                        </label>
-                      );
-                    })}
+                              if (field.type === "textarea") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={String(currentValue ?? "")}
+                                      placeholder={field.placeholder}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (isMenuProductResource && field.key === "recipeItemsJson") {
+                                const recipeItems = normalizeRecipeEditorItems(currentValue);
+                                const theoreticalCost = recipeItems.reduce((sum, recipeItem) => {
+                                  const selectedItem = inventoryFieldOptions.find((option) => option.value === recipeItem.inventoryItemId);
+                                  const unitCost = Number(selectedItem?.meta?.latestUnitCost ?? 0);
+                                  const quantity = Number(recipeItem.quantity ?? 0);
+                                  return sum + (Number.isFinite(quantity) ? quantity : 0) * unitCost;
+                                }, 0);
+
+                                return (
+                                  <div key={field.key} className={`admin-field ${field.fullWidth ? "admin-field--full" : ""}`}>
+                                    <span>{field.label}</span>
+                                    <div className="admin-recipe-editor">
+                                      {recipeItems.length ? (
+                                        <div className="admin-recipe-editor__rows">
+                                          {recipeItems.map((recipeItem, index) => {
+                                            const selectedItem = inventoryFieldOptions.find((option) => option.value === recipeItem.inventoryItemId);
+                                            return (
+                                              <div key={`${field.key}-${index}`} className="admin-recipe-editor__row">
+                                                <label className="admin-recipe-editor__field">
+                                                  <span>Hammadde</span>
+                                                  <AdminSelect
+                                                    value={recipeItem.inventoryItemId}
+                                                    disabled={isReadOnlyField}
+                                                    onChange={(event) => {
+                                                      const nextRecipeItems = recipeItems.map((row, rowIndex) =>
+                                                        rowIndex === index ? { ...row, inventoryItemId: event.target.value } : row,
+                                                      );
+                                                      handleFieldChange(field.key, nextRecipeItems);
+                                                    }}
+                                                  >
+                                                    <option value="">Hammadde sec</option>
+                                                    {inventoryFieldOptions.map((option) => (
+                                                      <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                      </option>
+                                                    ))}
+                                                  </AdminSelect>
+                                                </label>
+                                                <label className="admin-recipe-editor__field admin-recipe-editor__field--quantity">
+                                                  <span>Miktar</span>
+                                                  <AdminInput
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={recipeItem.quantity}
+                                                    disabled={isReadOnlyField}
+                                                    onChange={(event) => {
+                                                      const nextRecipeItems = recipeItems.map((row, rowIndex) =>
+                                                        rowIndex === index ? { ...row, quantity: event.target.value } : row,
+                                                      );
+                                                      handleFieldChange(field.key, nextRecipeItems);
+                                                    }}
+                                                  />
+                                                </label>
+                                                <div className="admin-recipe-editor__meta">
+                                                  <span className="admin-recipe-editor__unit">{String(selectedItem?.meta?.unitSymbol ?? "-")}</span>
+                                                  <small>
+                                                    Stok: {String(selectedItem?.meta?.currentStock ?? "-")} / Kritik:{" "}
+                                                    {String(selectedItem?.meta?.minimumLevel ?? "-")}
+                                                  </small>
+                                                </div>
+                                                <AdminButton
+                                                  variant="outline"
+                                                  disabled={isReadOnlyField}
+                                                  onClick={() => handleFieldChange(field.key, recipeItems.filter((_, rowIndex) => rowIndex !== index))}
+                                                >
+                                                  Sil
+                                                </AdminButton>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="admin-recipe-editor__empty">
+                                          <p>Bu urun icin henuz recete satiri eklenmedi.</p>
+                                        </div>
+                                      )}
+
+                                      <div className="admin-recipe-editor__footer">
+                                        <AdminButton
+                                          variant="outline"
+                                          disabled={isReadOnlyField}
+                                          onClick={() => handleFieldChange(field.key, [...recipeItems, { inventoryItemId: "", quantity: "" }])}
+                                        >
+                                          Hammadde Ekle
+                                        </AdminButton>
+                                        <div className="admin-recipe-editor__summary">
+                                          <span>Teorik maliyet</span>
+                                          <strong>{formatTryCurrency(theoreticalCost, { maximumFractionDigits: 2 })}</strong>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {field.helperText ? <small className="admin-field__helper">{field.helperText}</small> : null}
+                                  </div>
+                                );
+                              }
+
+                              if (field.type === "json") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={formatJsonFieldForTextarea(currentValue)}
+                                      placeholder={field.placeholder || "Satir satir veya anahtar: deger formatinda girin"}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (field.type === "switch") {
+                                return (
+                                  <AdminSwitchField
+                                    key={field.key}
+                                    label={field.label}
+                                    checked={Boolean(currentValue)}
+                                    disabled={isReadOnlyField}
+                                    helper={field.helperText}
+                                    className={field.fullWidth ? "admin-field--full" : ""}
+                                    onChange={(next) => handleFieldChange(field.key, next)}
+                                  />
+                                );
+                              }
+
+                              if (field.type === "select") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminSelect value={String(currentValue ?? "")} disabled={isReadOnlyField} onChange={(event) => handleFieldChange(field.key, event.target.value)}>
+                                      <option value="">Seciniz</option>
+                                      {(field.options ?? []).map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </AdminSelect>
+                                  </AdminField>
+                                );
+                              }
+
+                              return (
+                                <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                  <AdminInput
+                                    type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                                    value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
+                                    placeholder={field.placeholder}
+                                    disabled={isReadOnlyField}
+                                    onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                  />
+                                </AdminField>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
                   </div>
-                </section>
-              ))}
-            </div>
+                </>
+          ) : (
+                <>
+                  {error ? <AdminStatusBadge tone="danger">{error}</AdminStatusBadge> : null}
+                  {isMenuCategoryResource ? (
+                    <div className="admin-form-sections admin-form-sections--flat">
+                      {groupedFields.map(([section, fields]) => (
+                        <section key={section} className="admin-form-block">
+                          <div className="admin-form-block__head">
+                            <h4>{section}</h4>
+                          </div>
+                          <div className="admin-form-grid admin-form-grid--modal-sm">
+                            {fields.map((field) => {
+                              const currentValue = formData[field.key];
 
-            <div className="admin-filter-actions">
-              {selectedId ? (
-                <button className="admin-outline-button" type="button" onClick={handleDelete} disabled={submitting || !resourcePermissions.canManage}>
-                  Kaydi Sil
-                </button>
-              ) : null}
-              <button className="admin-primary-button" type="button" disabled={submitting || !resourcePermissions.canManage} onClick={handleSubmit}>
-                {submitting ? "Kaydediliyor..." : selectedId ? "Guncelle" : "Olustur"}
-              </button>
-            </div>
-          </section>
-        </div>
+                              const isReadOnlyField =
+                                detailMode === "detail" ||
+                                !resourcePermissions.canManage ||
+                                ((field.key === "basePrice" || field.key === "currentCost") && !resourcePermissions.canManagePrice);
+
+                              if (field.type === "textarea") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={String(currentValue ?? "")}
+                                      placeholder={field.placeholder}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (field.type === "json") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={formatJsonFieldForTextarea(currentValue)}
+                                      placeholder={field.placeholder || "Satir satir veya anahtar: deger formatinda girin"}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (field.type === "switch") {
+                                return (
+                                  <AdminSwitchField
+                                    key={field.key}
+                                    label={field.label}
+                                    checked={Boolean(currentValue)}
+                                    disabled={isReadOnlyField}
+                                    helper={field.helperText}
+                                    className={field.fullWidth ? "admin-field--full" : ""}
+                                    onChange={(next) => handleFieldChange(field.key, next)}
+                                  />
+                                );
+                              }
+
+                              if (field.type === "select") {
+                                const selectOptions =
+                                  isMenuCategoryResource && field.key === "parentId" && selectedId
+                                    ? (field.options ?? []).filter((option) => option.value !== selectedId)
+                                    : (field.options ?? []);
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminSelect value={String(currentValue ?? "")} disabled={isReadOnlyField} onChange={(event) => handleFieldChange(field.key, event.target.value)}>
+                                      <option value="">Seciniz</option>
+                                      {selectOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </AdminSelect>
+                                  </AdminField>
+                                );
+                              }
+
+                              return (
+                                <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                  <AdminInput
+                                    type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                                    value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
+                                    placeholder={field.placeholder}
+                                    disabled={isReadOnlyField}
+                                    onChange={(event) => handleFieldChange(field.key, field.type === "number" ? event.target.value : event.target.value)}
+                                  />
+                                </AdminField>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="admin-form-sections">
+                      {groupedFields.map(([section, fields]) => (
+                        <section key={section} className="admin-form-section">
+                          <div className="admin-section-head admin-section-head--compact">
+                            <div>
+                              <p className="admin-kicker">Form</p>
+                              <h3>{section}</h3>
+                            </div>
+                          </div>
+                          <div className="admin-form-grid">
+                            {fields.map((field) => {
+                              const currentValue = formData[field.key];
+
+                              const isReadOnlyField =
+                                detailMode === "detail" ||
+                                !resourcePermissions.canManage ||
+                                ((field.key === "basePrice" || field.key === "currentCost") && !resourcePermissions.canManagePrice);
+
+                              if (field.type === "textarea") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={String(currentValue ?? "")}
+                                      placeholder={field.placeholder}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (field.type === "json") {
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminTextarea
+                                      value={formatJsonFieldForTextarea(currentValue)}
+                                      placeholder={field.placeholder || "Satir satir veya anahtar: deger formatinda girin"}
+                                      disabled={isReadOnlyField}
+                                      onChange={(event) => handleFieldChange(field.key, event.target.value)}
+                                    />
+                                  </AdminField>
+                                );
+                              }
+
+                              if (field.type === "switch") {
+                                return (
+                                  <AdminSwitchField
+                                    key={field.key}
+                                    label={field.label}
+                                    checked={Boolean(currentValue)}
+                                    disabled={isReadOnlyField}
+                                    helper={field.helperText}
+                                    className={field.fullWidth ? "admin-field--full" : ""}
+                                    onChange={(next) => handleFieldChange(field.key, next)}
+                                  />
+                                );
+                              }
+
+                              if (field.type === "select") {
+                                const selectOptions =
+                                  isMenuCategoryResource && field.key === "parentId" && selectedId
+                                    ? (field.options ?? []).filter((option) => option.value !== selectedId)
+                                    : (field.options ?? []);
+                                return (
+                                  <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                    <AdminSelect value={String(currentValue ?? "")} disabled={isReadOnlyField} onChange={(event) => handleFieldChange(field.key, event.target.value)}>
+                                      <option value="">Seciniz</option>
+                                      {selectOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </AdminSelect>
+                                  </AdminField>
+                                );
+                              }
+
+                              return (
+                                <AdminField key={field.key} label={field.label} helper={field.helperText} fullWidth={field.fullWidth}>
+                                  <AdminInput
+                                    type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
+                                    value={field.type === "datetime" ? normalizeDateTimeValue(currentValue) : String(currentValue ?? "")}
+                                    placeholder={field.placeholder}
+                                    disabled={isReadOnlyField}
+                                    onChange={(event) => handleFieldChange(field.key, field.type === "number" ? event.target.value : event.target.value)}
+                                  />
+                                </AdminField>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  )}
+                </>
+          )}
+        </AdminModal>
       ) : null}
+
+      <AdminConfirmDialog
+        open={Boolean(confirmDeleteId)}
+        title="Kaydı silmek istiyor musun?"
+        description="Bu işlem geri alınamaz."
+        confirmLabel="Sil"
+        cancelLabel="İptal"
+        busy={submitting}
+        onCancel={() => setConfirmDeleteId(null)}
+        onConfirm={() => {
+          const id = confirmDeleteId;
+          if (!id) return;
+          setConfirmDeleteId(null);
+          void handleDeleteById(id);
+        }}
+      />
     </div>
   );
 }

@@ -23,7 +23,11 @@ export function getStoredAccessToken() {
     return null;
   }
 
-  return window.localStorage.getItem("adisyon.accessToken");
+  try {
+    return window.localStorage.getItem("adisyon.accessToken");
+  } catch {
+    return null;
+  }
 }
 
 export function getStoredRefreshToken() {
@@ -31,7 +35,11 @@ export function getStoredRefreshToken() {
     return null;
   }
 
-  return window.localStorage.getItem("adisyon.refreshToken");
+  try {
+    return window.localStorage.getItem("adisyon.refreshToken");
+  } catch {
+    return null;
+  }
 }
 
 export function clearStoredSession() {
@@ -39,9 +47,13 @@ export function clearStoredSession() {
     return;
   }
 
-  window.localStorage.removeItem("adisyon.accessToken");
-  window.localStorage.removeItem("adisyon.refreshToken");
-  window.localStorage.removeItem("adisyon.user");
+  try {
+    window.localStorage.removeItem("adisyon.accessToken");
+    window.localStorage.removeItem("adisyon.refreshToken");
+    window.localStorage.removeItem("adisyon.user");
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function requireStoredAccessToken() {

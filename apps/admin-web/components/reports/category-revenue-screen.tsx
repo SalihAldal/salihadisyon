@@ -59,14 +59,12 @@ export function CategoryRevenueScreen() {
   if (error || !report) return <AdminStateCard message={error ?? "Kategori raporu bulunamadi."} tone="danger" />;
 
   return (
-    <div className="dashboard-stack admin-reference-page admin-reports-page">
-      <section className="admin-page-intro">
-        <AdminPageHeader
-          kicker="Raporlar / Kategori Cirosu"
-          title="Kategori Bazli Ciro"
-          description="Gunluk ve aylik kategori performansini takip edin."
-        />
-      </section>
+    <div className="admin-page-stack admin-reports-page">
+      <AdminPageHeader
+        kicker="Raporlar / Kategori Cirosu"
+        title="Kategori Bazli Ciro"
+        description="Gunluk ve aylik kategori performansini takip edin."
+      />
 
       <ReportFilterForm branchOptions={catalog} />
 

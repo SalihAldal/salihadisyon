@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { AdminFilterPanel } from "../../ui/admin-ui";
+import { AdminButton, AdminFilterPanel, AdminInput } from "../../ui/admin-ui";
 import { EmployeeFilePreview, EmployeeTextField } from "./employee-editor-fields";
 import type { EmployeePersonalInfoFormData } from "./types";
 
@@ -29,9 +29,9 @@ export function PersonalInfoForm({
       title="Kisisel Bilgiler"
       description="Kimlik, egitim ve iletisim odakli kisisel alanlari duzenle."
       actions={
-        <button type="button" className="admin-primary-button" onClick={onSubmit} disabled={saving}>
+        <AdminButton variant="primary" onClick={onSubmit} disabled={saving} loading={saving}>
           {saving ? "Kaydediliyor..." : "Kaydet"}
-        </button>
+        </AdminButton>
       }
     >
       <EmployeeFilePreview url={value.photo} fallback={employeeName} />
@@ -42,11 +42,11 @@ export function PersonalInfoForm({
           <div className="admin-employee-editor__upload-row">
             <label className="admin-outline-button admin-employee-editor__upload-button">
               Fotograf Yukle
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onPhotoSelect} hidden />
+              <AdminInput type="file" accept="image/png,image/jpeg,image/webp" onChange={onPhotoSelect} hidden />
             </label>
-            <button type="button" className="admin-outline-button" onClick={onPhotoRemove} disabled={!value.photo}>
+            <AdminButton variant="outline" onClick={onPhotoRemove} disabled={!value.photo}>
               Fotograf Sil
-            </button>
+            </AdminButton>
             {value.photoFileName ? <span className="admin-employee-editor__upload-meta">{value.photoFileName}</span> : null}
           </div>
           <small className="admin-field__helper">Sadece PNG, JPG, JPEG veya WEBP. Maksimum 2 MB.</small>

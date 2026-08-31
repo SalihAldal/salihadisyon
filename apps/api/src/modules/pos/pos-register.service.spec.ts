@@ -32,6 +32,10 @@ function createService() {
     terminal: {
       findFirst: vi.fn(),
     },
+    registerClosing: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+    },
   };
 
   const auditLogService = {
@@ -201,6 +205,38 @@ describe("PosRegisterService", () => {
         action: "expense.create",
         entityId: "expense-1",
       }),
+    );
+  });
+
+  it("terminalId olmadan kullanicinin tek terminal kasasini cozer", async () => {
+    const { service, prisma } = createService();
+
+    prisma.registerClosing.findFirst.mockResolvedValue(null);
+    prisma.registerClosing.findMany.mockResolvedValueOnce([
+      {
+        id: "closing-terminal",
+        branchId: "branch-1",
+        userId: "user-1",
+        terminalId: "terminal_main",
+        isOpen: true,
+      },
+    ]);
+
+    const closing = await service.ensureActiveRegisterSession("branch-1", actor, null);
+    expect(closing.id).toBe("closing-terminal");
+  });
+
+  it("birden fazla acik terminal kasasi varsa terminal secimi ister", async () => {
+    const { service, prisma } = createService();
+
+    prisma.registerClosing.findFirst.mockResolvedValue(null);
+    prisma.registerClosing.findMany.mockResolvedValue([
+      { id: "closing-1", terminalId: "terminal_a", isOpen: true },
+      { id: "closing-2", terminalId: "terminal_b", isOpen: true },
+    ]);
+
+    await expect(service.ensureActiveRegisterSession("branch-1", actor, null)).rejects.toThrow(
+      "Birden fazla acik kasa session bulundu. Terminal secimi gerekli.",
     );
   });
 });

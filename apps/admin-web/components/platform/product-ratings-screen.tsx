@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { PlatformMetaResponse } from "../../lib/api/client";
 import { createProductRating, deleteProductRating, fetchPlatformMeta, fetchProductRatings, updateProductRating } from "../../lib/services/platform-service";
+import { AdminButton, AdminField, AdminInput, AdminPageHeader, AdminSelect, AdminStateCard, AdminTableCard, AdminTableWrap, AdminTextarea } from "../ui/admin-ui";
 
 export function ProductRatingsScreen() {
   const [meta, setMeta] = useState<PlatformMetaResponse | null>(null);
@@ -42,23 +43,13 @@ export function ProductRatingsScreen() {
   }
 
   return (
-    <div className="dashboard-stack">
-      <section className="admin-page-intro">
-        <div>
-          <p className="admin-kicker">Sprint 8 / Urun Puanlari</p>
-          <h3>Musteri deneyimi ve urun puan analizi</h3>
-        </div>
-      </section>
-      {error ? <div className="admin-status-pill admin-status-pill--danger">{error}</div> : null}
+    <div className="admin-page-stack admin-pos-settings-page">
+      <AdminPageHeader kicker="Platform" title="Urun Puanlari" description="Musteri deneyimi ve urun puan analizi." />
+      {error ? <AdminStateCard tone="danger" message={error} /> : null}
+
       <section className="admin-detail-grid">
-        <article className="admin-surface">
-          <div className="admin-section-head">
-            <div>
-              <p className="admin-kicker">Puan Listesi</p>
-              <h3>Kayitlar</h3>
-            </div>
-          </div>
-          <div className="admin-table-wrap">
+        <AdminTableCard kicker="Liste" title="Kayitlar">
+          <AdminTableWrap>
             <table className="admin-table">
               <thead>
                 <tr>
@@ -71,7 +62,14 @@ export function ProductRatingsScreen() {
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={String(item.id)} className="admin-table__row--clickable" onClick={() => { setSelectedId(String(item.id)); setFormData(item); }}>
+                  <tr
+                    key={String(item.id)}
+                    className="admin-table__row--clickable"
+                    onClick={() => {
+                      setSelectedId(String(item.id));
+                      setFormData(item);
+                    }}
+                  >
                     <td>{String(item.productName ?? "-")}</td>
                     <td>{String(item.branchName ?? "-")}</td>
                     <td>{String(item.customerName ?? "-")}</td>
@@ -81,45 +79,59 @@ export function ProductRatingsScreen() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </article>
-        <article className="admin-surface">
+          </AdminTableWrap>
+        </AdminTableCard>
+
+        <AdminTableCard kicker="Form" title={selectedId ? "Kayit Düzenle" : "Yeni Kayit"}>
           <div className="admin-form-grid">
-            <label className="admin-field">
-              <span>Sube</span>
-              <select value={String(formData.branchId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, branchId: event.target.value }))}>
+            <AdminField label="Sube">
+              <AdminSelect value={String(formData.branchId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, branchId: event.target.value }))}>
                 <option value="">Seciniz</option>
-                {(meta?.branches ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label className="admin-field">
-              <span>Urun</span>
-              <select value={String(formData.productId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, productId: event.target.value }))}>
+                {(meta?.branches ?? []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Urun">
+              <AdminSelect value={String(formData.productId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, productId: event.target.value }))}>
                 <option value="">Seciniz</option>
-                {(meta?.products ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label className="admin-field">
-              <span>Musteri</span>
-              <select value={String(formData.customerId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, customerId: event.target.value }))}>
+                {(meta?.products ?? []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Musteri">
+              <AdminSelect value={String(formData.customerId ?? "")} onChange={(event) => setFormData((current) => ({ ...current, customerId: event.target.value }))}>
                 <option value="">Opsiyonel</option>
-                {(meta?.customers ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-            <label className="admin-field">
-              <span>Puan</span>
-              <input type="number" min="1" max="5" value={String(formData.score ?? "")} onChange={(event) => setFormData((current) => ({ ...current, score: event.target.value }))} />
-            </label>
-            <label className="admin-field admin-field--full">
-              <span>Yorum</span>
-              <textarea value={String(formData.comment ?? "")} onChange={(event) => setFormData((current) => ({ ...current, comment: event.target.value }))} />
-            </label>
+                {(meta?.customers ?? []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Puan">
+              <AdminInput type="number" min="1" max="5" value={String(formData.score ?? "")} onChange={(event) => setFormData((current) => ({ ...current, score: event.target.value }))} />
+            </AdminField>
+            <AdminField label="Yorum" fullWidth>
+              <AdminTextarea value={String(formData.comment ?? "")} onChange={(event) => setFormData((current) => ({ ...current, comment: event.target.value }))} />
+            </AdminField>
           </div>
           <div className="admin-filter-actions">
-            {selectedId ? <button className="admin-outline-button" type="button" onClick={handleDelete}>Sil</button> : null}
-            <button className="admin-primary-button" type="button" onClick={handleSubmit}>{selectedId ? "Guncelle" : "Kaydet"}</button>
+            {selectedId ? (
+              <AdminButton variant="outline" className="admin-outline-button--danger" onClick={handleDelete}>
+                Sil
+              </AdminButton>
+            ) : null}
+            <AdminButton variant="primary" onClick={handleSubmit}>
+              {selectedId ? "Guncelle" : "Kaydet"}
+            </AdminButton>
           </div>
-        </article>
+        </AdminTableCard>
       </section>
     </div>
   );

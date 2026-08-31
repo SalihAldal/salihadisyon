@@ -1,6 +1,6 @@
 "use client";
 
-import { AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap, resolveBadgeTone } from "../../ui/admin-ui";
+import { AdminButton, AdminField, AdminInput, AdminModal, AdminSelect, AdminStateCard, AdminStatCard, AdminStatsGrid, AdminStatusBadge, AdminTableCard, AdminTableWrap, AdminTextarea, resolveBadgeTone } from "../../ui/admin-ui";
 import { formatTrDateTimeSafe } from "../../../lib/utils/admin-format";
 import type { EmployeeShiftFilters, EmployeeShiftFormData } from "./types";
 
@@ -62,12 +62,12 @@ export function ShiftsTab({
         description={`${employeeName} icin takvim, liste ve detay akisi.`}
         actions={
           <>
-            <button className="admin-outline-button" type="button" onClick={onExport} disabled={saving}>
+            <AdminButton variant="outline" onClick={onExport} disabled={saving} loading={saving}>
               Indir / Export
-            </button>
-            <button className="admin-primary-button" type="button" onClick={onOpenCreateShift} disabled={!employeeActive || saving}>
+            </AdminButton>
+            <AdminButton variant="primary" onClick={onOpenCreateShift} disabled={!employeeActive || saving} loading={saving}>
               Yeni Mesai Ekle
-            </button>
+            </AdminButton>
           </>
         }
       >
@@ -79,24 +79,24 @@ export function ShiftsTab({
               { key: "day", label: "Gun" },
               { key: "list", label: "Liste" },
             ].map((option) => (
-              <button
+              <AdminButton
                 key={option.key}
-                type="button"
-                className={filters.viewMode === option.key ? "admin-outline-button admin-outline-button--active" : "admin-outline-button"}
+                variant="outline"
+                className={filters.viewMode === option.key ? "admin-outline-button--active" : undefined}
                 onClick={() => onFilterChange({ ...filters, viewMode: option.key as EmployeeShiftFilters["viewMode"] })}
               >
                 {option.label}
-              </button>
+              </AdminButton>
             ))}
           </div>
           <div className="admin-employee-editor__shift-filters">
-            <input
+            <AdminInput
               className="admin-employee-editor__filter-input"
               type="date"
               value={filters.focusDate}
               onChange={(event) => onFilterChange({ ...filters, focusDate: event.target.value })}
             />
-            <select
+            <AdminSelect
               className="admin-select"
               value={filters.shiftType}
               onChange={(event) => onFilterChange({ ...filters, shiftType: event.target.value })}
@@ -105,7 +105,7 @@ export function ShiftsTab({
               <option value="WORK">Mesai</option>
               <option value="LEAVE">Izin</option>
               <option value="OFF_DAY">Off Day</option>
-            </select>
+            </AdminSelect>
           </div>
         </div>
 
@@ -147,9 +147,9 @@ export function ShiftsTab({
                         <td>{String(item.overtimeMinutes ?? 0)} dk</td>
                         <td>{String(item.approvalStatus ?? "-")}</td>
                         <td>
-                          <button className="admin-text-link" type="button" onClick={() => onSelectShift(item)}>
+                          <AdminButton variant="text" onClick={() => onSelectShift(item)}>
                             Detay
-                          </button>
+                          </AdminButton>
                         </td>
                       </tr>
                     ))}
@@ -187,9 +187,9 @@ export function ShiftsTab({
                               </td>
                               <td>{String(item.overtimeMinutes ?? 0)} dk</td>
                               <td>
-                                <button className="admin-text-link" type="button" onClick={() => onSelectShift(item)}>
+                                <AdminButton variant="text" onClick={() => onSelectShift(item)}>
                                   Detay
-                                </button>
+                                </AdminButton>
                               </td>
                             </tr>
                           ))}
@@ -240,50 +240,49 @@ export function ShiftsTab({
       ) : null}
 
       {shiftModalOpen ? (
-        <div className="admin-modal-backdrop" onClick={onCloseShiftModal}>
-          <section className="admin-modal-card admin-employee-payment-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="admin-section-head">
-              <div>
-                <p className="admin-kicker">Yeni Vardiya</p>
-                <h3>Mesai / izin / off day kaydi ekle</h3>
+        <AdminModal
+          open={shiftModalOpen}
+          size="md"
+          kicker="Personel / Mesai"
+          title="Yeni Vardiya"
+          description="Mesai / izin / off day kaydı ekle"
+          onClose={onCloseShiftModal}
+          closeDisabled={saving}
+          footer={
+            <div className="admin-modal__footer-content">
+              <div className="admin-modal__footer-left">
+                <AdminButton variant="text" onClick={onCloseShiftModal} disabled={saving}>
+                  Vazgeç
+                </AdminButton>
               </div>
-              <button className="admin-outline-button" type="button" onClick={onCloseShiftModal}>
-                Kapat
-              </button>
+              <div className="admin-modal__footer-right">
+                <AdminButton variant="primary" onClick={onSubmitShift} disabled={saving} loading={saving}>
+                  {saving ? "Kaydediliyor..." : "Kaydet"}
+                </AdminButton>
+              </div>
             </div>
-            {!overtimeEnabled ? <AdminStateCard message="Mesai aktif degil. Fazla mesai alanlari otomatik hesapta pasif izlenecek." tone="info" /> : null}
-            <div className="admin-form-grid">
-              <label className="admin-field">
-                <span>Kayit Turu</span>
-                <select value={shiftForm.shiftType} onChange={(event) => onShiftFormChange({ ...shiftForm, shiftType: event.target.value as EmployeeShiftFormData["shiftType"] })}>
-                  <option value="WORK">Mesai</option>
-                  <option value="LEAVE">Izin</option>
-                  <option value="OFF_DAY">Off Day</option>
-                </select>
-              </label>
-              <label className="admin-field">
-                <span>Baslangic</span>
-                <input type="datetime-local" value={shiftForm.scheduledStartAt} onChange={(event) => onShiftFormChange({ ...shiftForm, scheduledStartAt: event.target.value })} />
-              </label>
-              <label className="admin-field">
-                <span>Bitis</span>
-                <input type="datetime-local" value={shiftForm.scheduledEndAt} onChange={(event) => onShiftFormChange({ ...shiftForm, scheduledEndAt: event.target.value })} />
-              </label>
-              <label className="admin-field admin-field--full">
-                <span>Not</span>
-                <textarea rows={3} value={shiftForm.notes} onChange={(event) => onShiftFormChange({ ...shiftForm, notes: event.target.value })} />
-              </label>
-            </div>
-            <div className="admin-filter-actions">
-              <button className="admin-outline-button" type="button" onClick={onCloseShiftModal} disabled={saving}>
-                Vazgec
-              </button>
-              <button className="admin-primary-button" type="button" onClick={onSubmitShift} disabled={saving}>
-                {saving ? "Kaydediliyor..." : "Kaydet"}
-              </button>
-            </div>
-          </section>
-        </div>
+          }
+        >
+          {!overtimeEnabled ? <AdminStateCard message="Mesai aktif degil. Fazla mesai alanlari otomatik hesapta pasif izlenecek." tone="info" /> : null}
+          <div className="admin-form-grid">
+            <AdminField label="Kayit Turu">
+              <AdminSelect value={shiftForm.shiftType} onChange={(event) => onShiftFormChange({ ...shiftForm, shiftType: event.target.value as EmployeeShiftFormData["shiftType"] })} disabled={saving}>
+                <option value="WORK">Mesai</option>
+                <option value="LEAVE">Izin</option>
+                <option value="OFF_DAY">Off Day</option>
+              </AdminSelect>
+            </AdminField>
+            <AdminField label="Baslangic">
+              <AdminInput type="datetime-local" value={shiftForm.scheduledStartAt} onChange={(event) => onShiftFormChange({ ...shiftForm, scheduledStartAt: event.target.value })} disabled={saving} />
+            </AdminField>
+            <AdminField label="Bitis">
+              <AdminInput type="datetime-local" value={shiftForm.scheduledEndAt} onChange={(event) => onShiftFormChange({ ...shiftForm, scheduledEndAt: event.target.value })} disabled={saving} />
+            </AdminField>
+            <AdminField label="Not" fullWidth>
+              <AdminTextarea rows={3} value={shiftForm.notes} onChange={(event) => onShiftFormChange({ ...shiftForm, notes: event.target.value })} disabled={saving} />
+            </AdminField>
+          </div>
+        </AdminModal>
       ) : null}
     </div>
   );

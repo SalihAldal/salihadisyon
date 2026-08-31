@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchAuditLogs } from "../../lib/services/audit-service";
-import { AdminFilterPanel, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
+import { AdminButton, AdminField, AdminFilterPanel, AdminInput, AdminPageHeader, AdminStateCard, AdminStatusBadge, AdminTableCard, AdminTableWrap } from "../ui/admin-ui";
 
 type CancelLogRow = {
   id: string;
@@ -75,24 +75,23 @@ export function CancelListScreen() {
   if (error) return <AdminStateCard message={error} tone="danger" />;
 
   return (
-    <div className="dashboard-stack">
+    <div className="admin-page-stack admin-pos-settings-page">
       <AdminPageHeader
         kicker="Raporlar / Iptal Listesi"
         title="Iptal Edilen Adisyon ve Urunler"
         description="Kasadan gerceklestirilen iptallerin kaydini buradan takip edin."
         actions={
-          <button className="admin-outline-button" type="button" onClick={() => void loadLogs()}>
+          <AdminButton variant="outline" onClick={() => void loadLogs()}>
             Yenile
-          </button>
+          </AdminButton>
         }
       />
 
       <AdminFilterPanel title="Filtreler">
         <div className="admin-form-grid">
-          <label className="admin-field admin-field--full">
-            <span>Arama</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Garson, masa, urun, adisyon veya sube" />
-          </label>
+          <AdminField label="Arama" fullWidth>
+            <AdminInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Garson, masa, urun, adisyon veya sube" />
+          </AdminField>
         </div>
       </AdminFilterPanel>
 

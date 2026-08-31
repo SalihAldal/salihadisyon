@@ -2,9 +2,9 @@
   "name": "admin-web",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
@@ -12,6 +12,7 @@
     "@adisyon/config": "workspace:*",
     "@adisyon/types": "workspace:*",
     "@adisyon/ui": "workspace:*",
+    "lucide-react": "^0.541.0",
     "next": "^15.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

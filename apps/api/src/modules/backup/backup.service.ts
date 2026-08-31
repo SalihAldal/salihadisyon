@@ -2,7 +2,6 @@ import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import { createReadStream } from "fs";
 import { join, resolve } from "path";
-import { spawn } from "child_process";
 import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, Logger, NotFoundException } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import type { AuthenticatedUser } from "../../common/types/request-context";
@@ -10,6 +9,7 @@ import { AuditLogService } from "../../common/audit/audit-log.service";
 import { PrismaService } from "../../common/database/prisma.service";
 import { CreateSystemBackupDto } from "./dto/create-system-backup.dto";
 import { RestoreSystemBackupDto } from "./dto/restore-system-backup.dto";
+import { runPgDump, runPgRestore } from "./pg-tools";
 
 type BackupManifest = {
   backupId: string;
@@ -27,8 +27,6 @@ type BackupManifest = {
 export class BackupService {
   private readonly logger = new Logger(BackupService.name);
   private readonly backupRoot = resolve(process.cwd(), process.env.BACKUP_STORAGE_DIR ?? "storage/backups");
-  private readonly pgDumpCommand = process.env.PG_DUMP_PATH || "pg_dump";
-  private readonly pgRestoreCommand = process.env.PG_RESTORE_PATH || "pg_restore";
   private readonly criticalTables = [
     { key: "companies", count: () => this.prisma.company.count() },
     { key: "branches", count: () => this.prisma.branch.count() },
@@ -165,15 +163,7 @@ export class BackupService {
 
     await this.prisma.$disconnect();
     try {
-      await this.runCommand(this.pgRestoreCommand, [
-        "--clean",
-        "--if-exists",
-        "--no-owner",
-        "--no-privileges",
-        "--single-transaction",
-        `--dbname=${this.requireDatabaseUrl()}`,
-        source.filePath,
-      ]);
+      await runPgRestore(this.requireDatabaseUrl(), source.filePath);
     } catch (error) {
       await this.prisma.$connect();
       await this.auditLogService.create({
@@ -250,14 +240,7 @@ export class BackupService {
 
     try {
       const criticalSummary = await this.buildCriticalSummary();
-      await this.runCommand(this.pgDumpCommand, [
-        "--format=custom",
-        "--compress=9",
-        "--no-owner",
-        "--no-privileges",
-        `--file=${filePath}`,
-        this.requireDatabaseUrl(),
-      ]);
+      await runPgDump(this.requireDatabaseUrl(), filePath);
 
       const checksumSha256 = await this.computeFileChecksum(filePath);
       const stat = await fs.stat(filePath);
@@ -342,38 +325,6 @@ export class BackupService {
       stream.on("end", () => resolvePromise());
     });
     return hash.digest("hex");
-  }
-
-  private runCommand(command: string, args: string[]) {
-    return new Promise<void>((resolvePromise, rejectPromise) => {
-      const child = spawn(command, args, {
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      let stderr = "";
-      child.stderr.on("data", (chunk) => {
-        stderr += String(chunk);
-      });
-
-      child.on("error", (error) => {
-        rejectPromise(
-          new Error(
-            error.message.includes("ENOENT")
-              ? `${command} komutu bulunamadi. PG_DUMP_PATH / PG_RESTORE_PATH veya PATH ayarini kontrol et.`
-              : error.message,
-          ),
-        );
-      });
-
-      child.on("close", (code) => {
-        if (code === 0) {
-          resolvePromise();
-          return;
-        }
-        rejectPromise(new Error(stderr.trim() || `${command} komutu ${code} koduyla sonlandi.`));
-      });
-    });
   }
 
   private serializeBackup(item: {

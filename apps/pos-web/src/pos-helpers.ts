@@ -1,4 +1,4 @@
-import { hasAllPermissions } from "@adisyon/config";
+import { hasAllPermissions, isWaiterRole } from "@adisyon/config";
 import type { PosAuthSession } from "./api";
 import { POS_STORAGE_KEY } from "./pos-constants";
 
@@ -83,6 +83,44 @@ export function hasSessionPermission(session: PosAuthSession | null | undefined,
     },
     [permission],
   );
+}
+
+export function isWaiterSession(session: PosAuthSession | null | undefined) {
+  return isWaiterRole(session?.user.role);
+}
+
+export function mergeSessionUserFromMe(session: PosAuthSession, me: Record<string, unknown>): PosAuthSession {
+  const branchIds = Array.isArray(me.branchIds)
+    ? me.branchIds.map((item) => String(item)).filter(Boolean)
+    : session.user.branchIds;
+  const defaultBranchId =
+    (typeof me.defaultBranch === "object" && me.defaultBranch && typeof (me.defaultBranch as Record<string, unknown>).id === "string"
+      ? String((me.defaultBranch as Record<string, unknown>).id)
+      : null) ??
+    (typeof me.defaultBranchId === "string" ? me.defaultBranchId : session.user.defaultBranchId);
+
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      id: typeof me.id === "string" ? me.id : session.user.id,
+      fullName: typeof me.fullName === "string" ? me.fullName : session.user.fullName,
+      email: typeof me.email === "string" ? me.email : session.user.email,
+      tenantId:
+        typeof me.tenant === "object" && me.tenant && typeof (me.tenant as Record<string, unknown>).id === "string"
+          ? String((me.tenant as Record<string, unknown>).id)
+          : session.user.tenantId,
+      defaultBranchId,
+      branchIds,
+      role: typeof me.role === "string" ? me.role : session.user.role,
+      permissions: Array.isArray(me.permissions) ? me.permissions.map((item) => String(item)) : session.user.permissions,
+    },
+  };
+}
+
+export function persistPosSession(session: PosAuthSession) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(session));
 }
 
 export function formatCurrency(value: number | undefined) {
@@ -217,4 +255,18 @@ export function normalizePrintDispatch(raw: unknown) {
     documentType: String(record.documentType ?? ""),
     queuedAt: String(record.queuedAt ?? ""),
   };
+}
+
+/** Elapsed time since openedAt — uses UTC timestamps, HH:MM:SS or MM:SS */
+export function formatTableDuration(openedAt?: string | Date | null, nowMs = Date.now()) {
+  if (!openedAt) return null;
+  const startMs = new Date(openedAt).getTime();
+  if (!Number.isFinite(startMs)) return null;
+  const elapsedSec = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const hours = Math.floor(elapsedSec / 3600);
+  const minutes = Math.floor((elapsedSec % 3600) / 60);
+  const seconds = elapsedSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (hours > 0) return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(minutes)}:${pad(seconds)}`;
 }

@@ -17,12 +17,16 @@ import { MergeTicketDto } from "./dto/merge-ticket.dto";
 import { OpenRegisterDto } from "./dto/open-register.dto";
 import { PosReportQueryDto } from "./dto/pos-report-query.dto";
 import { PrinterDispatchDto } from "./dto/printer-dispatch.dto";
+import { PrinterBridgeAckDto, PrinterConnectionTestDto, TicketPrintDispatchDto } from "./dto/print-routing.dto";
 import { RefundTicketDto } from "./dto/refund-ticket.dto";
 import { SplitTicketDto } from "./dto/split-ticket.dto";
+import { SplitTicketByPersonDto } from "./dto/split-ticket-by-person.dto";
 import { TransferTicketDto } from "./dto/transfer-ticket.dto";
 import { UpdateTicketDto } from "./dto/update-ticket.dto";
 import { UpdateTicketItemDto } from "./dto/update-ticket-item.dto";
 import { VoidTicketDto } from "./dto/void-ticket.dto";
+import { VoidTicketItemDto } from "./dto/void-ticket-item.dto";
+import { ResolveApprovalDto } from "./dto/resolve-approval.dto";
 import { PosService } from "./pos.service";
 
 @Controller("pos")
@@ -40,6 +44,12 @@ export class PosController {
   @RequirePermissions("ticket.view")
   detail(@Param("ticketId") ticketId: string, @Req() request: AppRequest) {
     return this.posService.getTicketDetail(ticketId, this.getActor(request));
+  }
+
+  @Get("tickets/:ticketId/events")
+  @RequirePermissions("ticket.view")
+  listTicketEvents(@Param("ticketId") ticketId: string, @Req() request: AppRequest) {
+    return this.posService.listTicketEvents(ticketId, this.getActor(request));
   }
 
   @Get("catalog")
@@ -116,10 +126,27 @@ export class PosController {
     return this.posService.removeItem(ticketId, itemId, this.getActor(request));
   }
 
+  @Post("tickets/:ticketId/items/:itemId/void")
+  @RequirePermissions("ticket.manage")
+  voidItem(
+    @Param("ticketId") ticketId: string,
+    @Param("itemId") itemId: string,
+    @Body() body: VoidTicketItemDto,
+    @Req() request: AppRequest,
+  ) {
+    return this.posService.voidItem(ticketId, itemId, body, this.getActor(request));
+  }
+
   @Post("tickets/:ticketId/notes")
   @RequirePermissions("ticket.manage")
   addNote(@Param("ticketId") ticketId: string, @Body() body: AddTicketNoteDto, @Req() request: AppRequest) {
     return this.posService.addNote(ticketId, body, this.getActor(request));
+  }
+
+  @Post("tickets/:ticketId/bill-request")
+  @RequirePermissions("ticket.manage")
+  requestBill(@Param("ticketId") ticketId: string, @Req() request: AppRequest) {
+    return this.posService.requestBill(ticketId, this.getActor(request));
   }
 
   @Post("tickets/:ticketId/discounts")
@@ -166,10 +193,16 @@ export class PosController {
     return this.posService.splitTicket(ticketId, body, this.getActor(request));
   }
 
+  @Post("tickets/:ticketId/split/by-person")
+  @RequirePermissions("ticket.manage")
+  splitTicketByPerson(@Param("ticketId") ticketId: string, @Body() body: SplitTicketByPersonDto, @Req() request: AppRequest) {
+    return this.posService.splitTicketByPerson(ticketId, body, this.getActor(request));
+  }
+
   @Post("tickets/:ticketId/merge")
   @RequirePermissions("table.merge")
-  mergeTicket(@Param("ticketId") _ticketId: string, @Body() body: MergeTicketDto, @Req() request: AppRequest) {
-    return this.posService.mergeTickets(body, this.getActor(request));
+  mergeTicket(@Param("ticketId") ticketId: string, @Body() body: MergeTicketDto, @Req() request: AppRequest) {
+    return this.posService.mergeTickets(body, this.getActor(request), ticketId);
   }
 
   @Post("tickets/:ticketId/transfer")
@@ -194,6 +227,40 @@ export class PosController {
   @RequirePermissions("ticket.manage")
   requestApproval(@Body() body: ApprovalRequestDto, @Req() request: AppRequest) {
     return this.posService.createApprovalRequest(body, this.getActor(request));
+  }
+
+  @Post("approvals/:approvalId/approve")
+  @RequirePermissions("ticket.manage")
+  approveApproval(@Param("approvalId") approvalId: string, @Body() body: ResolveApprovalDto, @Req() request: AppRequest) {
+    return this.posService.approveApprovalRequest(approvalId, body, this.getActor(request));
+  }
+
+  @Post("approvals/:approvalId/reject")
+  @RequirePermissions("ticket.manage")
+  rejectApproval(@Param("approvalId") approvalId: string, @Body() body: ResolveApprovalDto, @Req() request: AppRequest) {
+    return this.posService.rejectApprovalRequest(approvalId, body, this.getActor(request));
+  }
+
+  @Post("tickets/:ticketId/print-routing")
+  @RequirePermissions("ticket.manage")
+  dispatchTicketPrintRouting(
+    @Param("ticketId") ticketId: string,
+    @Body() body: TicketPrintDispatchDto,
+    @Req() request: AppRequest,
+  ) {
+    return this.posService.dispatchTicketPrintRouting(ticketId, body, this.getActor(request));
+  }
+
+  @Post("printers/jobs/:jobId/ack")
+  @RequirePermissions("ticket.manage")
+  acknowledgePrintJob(@Param("jobId") jobId: string, @Body() body: PrinterBridgeAckDto, @Req() request: AppRequest) {
+    return this.posService.acknowledgePrintJob(jobId, body, this.getActor(request));
+  }
+
+  @Post("printers/test-connection")
+  @RequirePermissions("device.manage")
+  testPrinterConnection(@Body() body: PrinterConnectionTestDto, @Req() request: AppRequest) {
+    return this.posService.testPrinterConnection(body, this.getActor(request));
   }
 
   @Post("printers/dispatch")
