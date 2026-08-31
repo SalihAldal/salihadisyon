@@ -872,6 +872,33 @@ select {
   }
 }
 
+.pos-catalog-drawer {
+  display: grid;
+  gap: 10px;
+}
+
+.pos-catalog-drawer__products {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+@media (max-width: 900px) {
+  .pos-catalog-drawer__products {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .pos-catalog-drawer__products {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: 60vh;
+  }
+}
+
 /* Table detail modal (desktop + mobile) */
 .pos-table-modal {
   width: min(1280px, calc(100vw - 44px));

@@ -71,6 +71,7 @@ type PosDrawerKey =
   | "payment"
   | "actions"
   | "history"
+  | "catalog"
   | "pending"
   | "note"
   | "register"
@@ -2821,7 +2822,7 @@ export function App() {
   const canViewCancelList = hasSessionPermission(session, "reports.view");
 
   const isCurrentTicketLockedForWaiter = isWaiterMode && selectedTicket?.id ? waiterLockedTicketIds.includes(String(selectedTicket.id)) : false;
-  const canMutateCurrentTicketItems = !isWaiterMode;
+  const canMutateCurrentTicketItems = isWaiterMode ? !isCurrentTicketLockedForWaiter : true;
   const canOpenRegister = canOpenRegisterPermission && !anyPending && Number.isFinite(openingCashValue) && openingCashValue >= 0;
   const expenseDescription = expenseForm.description.trim();
   const expenseAmountValue = roundCurrency(Number(expenseForm.amount));
@@ -3265,12 +3266,17 @@ export function App() {
           tableLabel={activeTableId ? selectedTableLabel : "Masa"}
           statusLabel={selectedTicket?.status ? formatTicketStatus(String(selectedTicket.status)) : null}
           pending={anyPending}
+          isWaiterMode={isWaiterMode}
           canMutateItems={canMutateCurrentTicketItems}
           onClose={closeDrawer}
+          onOpenCatalog={() => openDrawer("catalog")}
           onOpenActions={() => openDrawer("actions")}
           onOpenHistory={() => openDrawer("history")}
           onOpenNote={() => openDrawer("note")}
-          onPrint={() => void handlePrint("receipt")}
+          onPrint={() => (isWaiterMode ? void handleSendToKitchen() : void handlePrint("receipt"))}
+          onSendToKitchen={() => void handleSendToKitchen()}
+          onRequestBill={() => void handleRequestBill()}
+          billRequested={Boolean(selectedTicket?.billRequestedAt)}
           onOpenPayment={() => openDrawer("payment")}
           onChangeQuantity={(item, diff) => void changeQuantity(item, diff)}
           onRemoveItem={(item) => {
@@ -3286,6 +3292,60 @@ export function App() {
             });
           }}
         />
+      </PaymentDrawer>
+
+      <PaymentDrawer open={activeDrawer === "catalog"} eyebrow="Menü" title="Ürün Ekle" onClose={closeDrawer}>
+        <div className="pos-catalog-drawer">
+          <CategoryStrip>
+            <button
+              className={`category-pill ${activeTopCategoryId === "all" ? "active" : ""}`}
+              type="button"
+              onClick={() => {
+                setActiveTopCategoryId("all");
+                setActiveSubCategoryId("all");
+              }}
+            >
+              Tüm Ürünler
+            </button>
+            {topCategories.map((category) => (
+              <button
+                key={String(category.id)}
+                className={`category-pill ${activeTopCategoryId === String(category.id) ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setActiveTopCategoryId(String(category.id));
+                  setActiveSubCategoryId("all");
+                }}
+              >
+                {String(category.name)}
+              </button>
+            ))}
+          </CategoryStrip>
+          <SubcategoryStrip>
+            <button className={`subcategory-pill ${activeSubCategoryId === "all" ? "active" : ""}`} type="button" onClick={() => setActiveSubCategoryId("all")}>
+              Tümü
+            </button>
+            {subCategories.map((category) => (
+              <button
+                key={String(category.id)}
+                className={`subcategory-pill ${activeSubCategoryId === String(category.id) ? "active" : ""}`}
+                type="button"
+                onClick={() => setActiveSubCategoryId(String(category.id))}
+              >
+                {String(category.name)}
+              </button>
+            ))}
+          </SubcategoryStrip>
+          <div className="pos-catalog-drawer__products">
+            {pagedProducts.length ? (
+              pagedProducts.map((product) => (
+                <PosProductCard key={String(product.id)} product={product} onSelect={() => openProductDrawer(product)} />
+              ))
+            ) : (
+              <div className="waiter-lobby__empty">Bu kategoride ürün bulunamadı.</div>
+            )}
+          </div>
+        </div>
       </PaymentDrawer>
 
       <PaymentDrawer
@@ -4237,18 +4297,20 @@ export function App() {
           </span>
           <span className="pos-bottom-nav__label">Masalar</span>
         </button>
-        <button
-          type="button"
-          className="pos-bottom-nav__item"
-          onClick={() => {
-            openDrawer("history");
-          }}
-        >
-          <span className="pos-bottom-nav__icon" aria-hidden="true">
-            ≡
-          </span>
-          <span className="pos-bottom-nav__label">Adisyonlar</span>
-        </button>
+        {!isWaiterMode ? (
+          <button
+            type="button"
+            className="pos-bottom-nav__item"
+            onClick={() => {
+              openDrawer("history");
+            }}
+          >
+            <span className="pos-bottom-nav__icon" aria-hidden="true">
+              ≡
+            </span>
+            <span className="pos-bottom-nav__label">Adisyonlar</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="pos-bottom-nav__item"

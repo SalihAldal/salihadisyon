@@ -41,12 +41,17 @@ export function PosTableDetailModal({
   tableLabel,
   statusLabel,
   pending,
+  isWaiterMode,
   canMutateItems,
   onClose,
+  onOpenCatalog,
   onOpenActions,
   onOpenHistory,
   onOpenNote,
   onPrint,
+  onSendToKitchen,
+  onRequestBill,
+  billRequested,
   onOpenPayment,
   onChangeQuantity,
   onRemoveItem,
@@ -55,12 +60,17 @@ export function PosTableDetailModal({
   tableLabel: string;
   statusLabel?: string | null;
   pending: boolean;
+  isWaiterMode: boolean;
   canMutateItems: boolean;
   onClose: () => void;
+  onOpenCatalog: () => void;
   onOpenActions: () => void;
   onOpenHistory: () => void;
   onOpenNote: () => void;
   onPrint: () => void;
+  onSendToKitchen: () => void;
+  onRequestBill: () => void;
+  billRequested: boolean;
   onOpenPayment: () => void;
   onChangeQuantity: (item: Record<string, any>, diff: number) => void;
   onRemoveItem: (item: Record<string, any>) => void;
@@ -108,14 +118,16 @@ export function PosTableDetailModal({
 
         <div className="pos-table-modal__head-actions">
           <button type="button" className="pos-ghost-btn" onClick={onPrint} disabled={pending}>
-            <Icon d={icons.print} /> Yazdır
+            <Icon d={icons.print} /> {isWaiterMode ? "Mutfak" : "Yazdır"}
           </button>
           <button type="button" className="pos-ghost-btn" onClick={onOpenNote} disabled={pending}>
             <Icon d={icons.note} /> Not Ekle
           </button>
-          <button type="button" className="pos-ghost-btn" onClick={onOpenHistory} disabled={pending}>
-            <Icon d={icons.history} /> Geçmiş
-          </button>
+          {!isWaiterMode ? (
+            <button type="button" className="pos-ghost-btn" onClick={onOpenHistory} disabled={pending}>
+              <Icon d={icons.history} /> Geçmiş
+            </button>
+          ) : null}
           <button type="button" className="pos-icon-x" aria-label="Kapat" onClick={onClose}>
             <Icon d={icons.close} />
           </button>
@@ -142,9 +154,11 @@ export function PosTableDetailModal({
         <div className="pos-meta-card pos-meta-card--total">
           <span className="pos-meta-card__label">Toplam</span>
           <strong className="pos-meta-card__value">{money(grandTotal)}</strong>
-          <button type="button" className="pos-kebab" aria-label="Daha fazla" onClick={onOpenActions}>
-            <Icon d={icons.kebab} />
-          </button>
+          {!isWaiterMode ? (
+            <button type="button" className="pos-kebab" aria-label="Daha fazla" onClick={onOpenActions}>
+              <Icon d={icons.kebab} />
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -152,12 +166,16 @@ export function PosTableDetailModal({
         <button type="button" className={`pos-tab ${tab === "orders" ? "active" : ""}`} onClick={() => setTab("orders")}>
           Siparişler
         </button>
-        <button type="button" className={`pos-tab ${tab === "ticket" ? "active" : ""}`} onClick={() => setTab("ticket")}>
-          Adisyon
-        </button>
-        <button type="button" className={`pos-tab ${tab === "payment" ? "active" : ""}`} onClick={() => setTab("payment")}>
-          Ödeme
-        </button>
+        {!isWaiterMode ? (
+          <button type="button" className={`pos-tab ${tab === "ticket" ? "active" : ""}`} onClick={() => setTab("ticket")}>
+            Adisyon
+          </button>
+        ) : null}
+        {!isWaiterMode ? (
+          <button type="button" className={`pos-tab ${tab === "payment" ? "active" : ""}`} onClick={() => setTab("payment")}>
+            Ödeme
+          </button>
+        ) : null}
         <button type="button" className={`pos-tab ${tab === "notes" ? "active" : ""}`} onClick={() => setTab("notes")}>
           Notlar
         </button>
@@ -169,12 +187,14 @@ export function PosTableDetailModal({
             <header className="pos-card__head">
               <strong>Siparişler</strong>
               <div className="pos-card__head-actions">
-                <button type="button" className="pos-icon-btn-sm" aria-label="Sipariş ekle" onClick={onOpenActions} disabled={pending}>
+                <button type="button" className="pos-icon-btn-sm" aria-label="Sipariş ekle" onClick={onOpenCatalog} disabled={pending}>
                   <Icon d={icons.plus} />
                 </button>
-                <button type="button" className="pos-icon-btn-sm" aria-label="Menü" onClick={onOpenActions}>
-                  <Icon d={icons.kebab} />
-                </button>
+                {!isWaiterMode ? (
+                  <button type="button" className="pos-icon-btn-sm" aria-label="Menü" onClick={onOpenActions}>
+                    <Icon d={icons.kebab} />
+                  </button>
+                ) : null}
               </div>
             </header>
 
@@ -477,15 +497,31 @@ export function PosTableDetailModal({
       )}
 
       <footer className="pos-table-modal__footer">
-        <button type="button" className="pos-footer-menu" onClick={onOpenActions}>
-          Masa İşlemleri
-        </button>
-        <button type="button" className="pos-footer-secondary" onClick={onOpenActions} disabled>
-          Adisyona Dönüştür
-        </button>
-        <button type="button" className="pos-footer-primary" onClick={onOpenPayment} disabled={pending || !ticket}>
-          Ödeme Al
-        </button>
+        {isWaiterMode ? (
+          <>
+            <button type="button" className="pos-footer-menu" onClick={onOpenCatalog} disabled={pending}>
+              Ürün Ekle
+            </button>
+            <button type="button" className="pos-footer-secondary" onClick={onSendToKitchen} disabled={pending || !ticket}>
+              Mutfağa Gönder
+            </button>
+            <button type="button" className="pos-footer-primary" onClick={onRequestBill} disabled={pending || !ticket || billRequested}>
+              {billRequested ? "Hesap İstendi" : "Hesap İste"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="pos-footer-menu" onClick={onOpenActions}>
+              Masa İşlemleri
+            </button>
+            <button type="button" className="pos-footer-secondary" onClick={onOpenActions} disabled>
+              Adisyona Dönüştür
+            </button>
+            <button type="button" className="pos-footer-primary" onClick={onOpenPayment} disabled={pending || !ticket}>
+              Ödeme Al
+            </button>
+          </>
+        )}
         <div className="pos-footer-mobile">
           <button type="button" className="pos-footer-mobile__summary" onClick={onOpenActions}>
             <span>Kalan</span>
