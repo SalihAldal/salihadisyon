@@ -328,7 +328,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <main className="admin-main">
           <header className="admin-topbar">
           <div className="admin-topbar__left">
-            <AdminIconButton onClick={() => setMobileNavOpen(true)} aria-label="Menü" className="admin-topbar__hamburger">
+            <AdminIconButton label="Menü" onClick={() => setMobileNavOpen(true)} aria-label="Menü" className="admin-topbar__hamburger">
               <AdminMenuIcon width={18} height={18} />
             </AdminIconButton>
             <div className="admin-search">
@@ -354,10 +354,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
               </label>
             ) : null}
 
-            <AdminIconButton aria-label="Bildirimler" disabled>
+            <AdminIconButton label="Bildirimler" aria-label="Bildirimler" disabled>
               <AdminBellIcon width={18} height={18} />
             </AdminIconButton>
-            <AdminIconButton aria-label="Yardım" disabled>
+            <AdminIconButton label="Yardım" aria-label="Yardım" disabled>
               <AdminHelpIcon width={18} height={18} />
             </AdminIconButton>
             <div className="admin-user-pill">
@@ -367,7 +367,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 <p>{userInfo?.role ?? "Yetkili Kullanıcı"}</p>
               </div>
             </div>
-            <AdminIconButton onClick={logout} aria-label="Çıkış yap">
+            <AdminIconButton label="Çıkış yap" onClick={logout} aria-label="Çıkış yap">
               <AdminLogOutIcon width={18} height={18} />
             </AdminIconButton>
           </div>
