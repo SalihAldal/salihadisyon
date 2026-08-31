@@ -226,7 +226,7 @@ export function PosTableDetailModal({
                     </div>
                     <div className="pos-orders-table__cell">
                       <div className="pos-stepper">
-                        <button type="button" onClick={() => onChangeQuantity(item, -1)} disabled={pending || !canMutateItems}>
+                        <button type="button" onClick={() => onChangeQuantity(item, -1)} disabled={isWaiterMode || pending || !canMutateItems}>
                           –
                         </button>
                         <span>{qty}</span>
@@ -238,7 +238,7 @@ export function PosTableDetailModal({
                     <div className="pos-orders-table__cell">{money(unit)}</div>
                     <div className="pos-orders-table__cell pos-orders-table__total">{money(total)}</div>
                     <div className="pos-orders-table__cell">
-                      <button type="button" className="pos-row-kebab" aria-label="Satır işlemleri" onClick={() => onRemoveItem(item)} disabled={pending || !canMutateItems}>
+                      <button type="button" className="pos-row-kebab" aria-label="Satır işlemleri" onClick={() => onRemoveItem(item)} disabled={isWaiterMode || pending || !canMutateItems}>
                         <Icon d={icons.kebab} />
                       </button>
                     </div>

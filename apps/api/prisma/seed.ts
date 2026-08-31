@@ -31,6 +31,31 @@ function addDays(baseDate: Date, days: number, hour = 0, minute = 0) {
   return date;
 }
 
+function slugifyTr(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/ı/g, "i")
+    .replace(/İ/g, "i")
+    .replace(/ş/g, "s")
+    .replace(/Ş/g, "s")
+    .replace(/ğ/g, "g")
+    .replace(/Ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/Ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/Ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/Ç/g, "c")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+function seedId(prefix: string, name: string) {
+  const slug = slugifyTr(name).slice(0, 60) || "item";
+  return `${prefix}_${slug}`;
+}
+
 async function main() {
   assertSafeDemoEnvironment("seed");
 
@@ -949,6 +974,294 @@ async function main() {
       printerType: "bar",
     },
   });
+
+  // Simple 4-category menu for POS demo (requested).
+  const simpleDrinksCategory = await prisma.menuCategory.upsert({
+    where: { id: "menu_cat_simple_icecekler" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "İçecekler",
+      slug: "icecekler",
+      sortOrder: 1,
+      isVisible: true,
+      showInQr: true,
+      printerType: "bar",
+    },
+    create: {
+      id: "menu_cat_simple_icecekler",
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "İçecekler",
+      slug: "icecekler",
+      sortOrder: 1,
+      isVisible: true,
+      showInQr: true,
+      printerType: "bar",
+    },
+  });
+
+  const simpleBreakfastCategory = await prisma.menuCategory.upsert({
+    where: { id: "menu_cat_simple_kahvalti" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Kahvaltı",
+      slug: "kahvalti",
+      sortOrder: 2,
+      isVisible: true,
+      showInQr: true,
+      printerType: "kitchen",
+    },
+    create: {
+      id: "menu_cat_simple_kahvalti",
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Kahvaltı",
+      slug: "kahvalti",
+      sortOrder: 2,
+      isVisible: true,
+      showInQr: true,
+      printerType: "kitchen",
+    },
+  });
+
+  const simplePastaCategory = await prisma.menuCategory.upsert({
+    where: { id: "menu_cat_simple_makarna" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Makarna",
+      slug: "makarna",
+      sortOrder: 3,
+      isVisible: true,
+      showInQr: true,
+      printerType: "kitchen",
+    },
+    create: {
+      id: "menu_cat_simple_makarna",
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Makarna",
+      slug: "makarna",
+      sortOrder: 3,
+      isVisible: true,
+      showInQr: true,
+      printerType: "kitchen",
+    },
+  });
+
+  const simpleDessertCategory = await prisma.menuCategory.upsert({
+    where: { id: "menu_cat_simple_tatli" },
+    update: {
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Tatlı",
+      slug: "tatli",
+      sortOrder: 4,
+      isVisible: true,
+      showInQr: true,
+      printerType: "bar",
+    },
+    create: {
+      id: "menu_cat_simple_tatli",
+      companyId: company.id,
+      branchId: branchA.id,
+      name: "Tatlı",
+      slug: "tatli",
+      sortOrder: 4,
+      isVisible: true,
+      showInQr: true,
+      printerType: "bar",
+    },
+  });
+
+  // Hide all other categories in Branch A to keep POS navigation clean.
+  await prisma.menuCategory.updateMany({
+    where: {
+      companyId: company.id,
+      branchId: branchA.id,
+      id: {
+        notIn: [simpleDrinksCategory.id, simpleBreakfastCategory.id, simplePastaCategory.id, simpleDessertCategory.id],
+      },
+    },
+    data: {
+      isVisible: false,
+      showInQr: false,
+    },
+  });
+
+  const docxMenuItems: Array<{
+    id: string;
+    categoryId: string;
+    name: string;
+    slug: string;
+    description?: string;
+  }> = [];
+
+  const addMenuItem = (categoryId: string, name: string, description?: string) => {
+    const id = seedId("docx_product", `${categoryId}_${name}`);
+    const slug = slugifyTr(name);
+    docxMenuItems.push({
+      id,
+      categoryId,
+      name,
+      slug: slug || id,
+      description,
+    });
+  };
+
+  // İçecekler + Kahveler
+  addMenuItem(simpleDrinksCategory.id, "Türk kahvesi");
+  addMenuItem(simpleDrinksCategory.id, "Filtre Kahve");
+  addMenuItem(simpleDrinksCategory.id, "Sütlü Filtre Kahve");
+  addMenuItem(simpleDrinksCategory.id, "Americano");
+  addMenuItem(simpleDrinksCategory.id, "Latte");
+  addMenuItem(simpleDrinksCategory.id, "Flat White");
+  addMenuItem(simpleDrinksCategory.id, "Cappuccino");
+  addMenuItem(simpleDrinksCategory.id, "Espresso");
+  addMenuItem(simpleDrinksCategory.id, "Double Espresso");
+  addMenuItem(simpleDrinksCategory.id, "Ice Filtre Kahve");
+  addMenuItem(simpleDrinksCategory.id, "Ice Sütlü Filtre Kahve");
+  addMenuItem(simpleDrinksCategory.id, "Ice Americano");
+  addMenuItem(simpleDrinksCategory.id, "Ice Latte");
+  addMenuItem(simpleDrinksCategory.id, "Ice Flat White");
+  addMenuItem(simpleDrinksCategory.id, "Ice Cappuccino");
+  addMenuItem(simpleDrinksCategory.id, "Cocostar Latte", "Hindistan cevizi, çikolata");
+  addMenuItem(simpleDrinksCategory.id, "Toffee Nut Latte", "Karamel, fındık");
+  addMenuItem(simpleDrinksCategory.id, "Lotus Latte");
+  addMenuItem(simpleDrinksCategory.id, "Cookie Latte");
+  addMenuItem(simpleDrinksCategory.id, "Mocha");
+  addMenuItem(simpleDrinksCategory.id, "White Mocha");
+  addMenuItem(simpleDrinksCategory.id, "Karamel Macchiato");
+  addMenuItem(simpleDrinksCategory.id, "Chai Tea Latte");
+  addMenuItem(simpleDrinksCategory.id, "Oreo Latte");
+  addMenuItem(simpleDrinksCategory.id, "Cool Lime", "Küba nanesi, lime özü");
+  addMenuItem(simpleDrinksCategory.id, "Berry Hibiscus", "Hibiscus çayı, hibiscus özü");
+  addMenuItem(simpleDrinksCategory.id, "Mango Orange", "Mango, portakal");
+  addMenuItem(simpleDrinksCategory.id, "Cindy", "Çilek, ahududu, hibiscus, lime");
+  addMenuItem(simpleDrinksCategory.id, "Churchill", "Soda, limon, tuz");
+  addMenuItem(simpleDrinksCategory.id, "Çay");
+  addMenuItem(simpleDrinksCategory.id, "Salep");
+  addMenuItem(simpleDrinksCategory.id, "Sıcak Çikolata");
+  addMenuItem(simpleDrinksCategory.id, "Sıcak Süt");
+  addMenuItem(simpleDrinksCategory.id, "Ihlamur Çayı");
+  addMenuItem(simpleDrinksCategory.id, "Ada Çayı");
+  addMenuItem(simpleDrinksCategory.id, "Nane Limon Çayı");
+  addMenuItem(simpleDrinksCategory.id, "Yeşil Çay");
+  addMenuItem(simpleDrinksCategory.id, "Kuşburnu Çayı");
+  addMenuItem(simpleDrinksCategory.id, "Su");
+  addMenuItem(simpleDrinksCategory.id, "Sade soda");
+  addMenuItem(simpleDrinksCategory.id, "Limonata");
+  addMenuItem(simpleDrinksCategory.id, "Portakal Suyu");
+  addMenuItem(simpleDrinksCategory.id, "Meyveli soda (Elma)");
+  addMenuItem(simpleDrinksCategory.id, "Meyveli soda (Limon)");
+  addMenuItem(simpleDrinksCategory.id, "Meyveli soda (Çilek)");
+  addMenuItem(simpleDrinksCategory.id, "Coca Cola");
+  addMenuItem(simpleDrinksCategory.id, "Fanta");
+  addMenuItem(simpleDrinksCategory.id, "Sprite");
+  addMenuItem(simpleDrinksCategory.id, "Soğuk çay (Mango)");
+  addMenuItem(simpleDrinksCategory.id, "Soğuk çay (Şeftali)");
+  addMenuItem(simpleDrinksCategory.id, "Soğuk çay (Limon)");
+  addMenuItem(simpleDrinksCategory.id, "Soğuk çay (Karpuz)");
+  addMenuItem(simpleDrinksCategory.id, "Çikolatalı Milkshake");
+  addMenuItem(simpleDrinksCategory.id, "Çilekli Milkshake");
+  addMenuItem(simpleDrinksCategory.id, "Vanilyalı Milkshake");
+  addMenuItem(simpleDrinksCategory.id, "Oreolu Milkshake");
+  addMenuItem(simpleDrinksCategory.id, "Lotus Milkshake");
+  addMenuItem(simpleDrinksCategory.id, "Cocostar Milkshake", "Hindistan cevizi, çikolata");
+  addMenuItem(simpleDrinksCategory.id, "Snow White", "Hindistan cevizi, beyaz çikolata, fındık");
+  addMenuItem(simpleDrinksCategory.id, "Frozen Mango");
+  addMenuItem(simpleDrinksCategory.id, "Frozen Çarkıfelek");
+  addMenuItem(simpleDrinksCategory.id, "Frozen Orman meyveli");
+  addMenuItem(simpleDrinksCategory.id, "Frozen Çilek");
+  addMenuItem(simpleDrinksCategory.id, "Frozen Mango Portakal");
+
+  // Kahvaltı
+  addMenuItem(
+    simpleBreakfastCategory.id,
+    "Serpme Kahvaltı",
+    "Ezine peyniri, beyaz peynir, kaşar peyniri, ızgara hellim, bal, kaymak, çilek reçeli, süt reçeli, vişne reçeli, yeşil ve siyah zeytin, sigara böreği, sosis, yumurtalı ekmek, patates kızartması, yeşillik, sahanda sucuk, menemen veya çırpılmış yumurta, sınırsız çay.",
+  );
+  addMenuItem(
+    simpleBreakfastCategory.id,
+    "Tek kişilik kahvaltı",
+    "Domates, salatalık, siyah ve yeşil zeytin, sucuk ve yumurta, kaşar peynir, beyaz peynir, ezine peynir, bal, çay.",
+  );
+  addMenuItem(simpleBreakfastCategory.id, "Sahanda Menemen");
+  addMenuItem(simpleBreakfastCategory.id, "Sahanda Sucuk");
+
+  // Tavuk Makarna (soslara göre)
+  for (const sauce of ["Barbekü soslu", "Körili soslu", "Köz biberli", "Kekikli", "Kremalı Mantarlı", "Acılı", "Pesto soslu"]) {
+    addMenuItem(simplePastaCategory.id, `Tavuk Makarna (${sauce})`);
+  }
+
+  // Tatlı
+  const dessertItems: Array<{ name: string; description?: string }> = [
+    { name: "Govi Box 2-3", description: "Mini pankek, waffle, brownie, muz, çilek, sütlü ve beyaz 2 pot çikolata" },
+    { name: "Govi Box 4-6", description: "Mini pankek, waffle, kruvasan, krep, brownie, muz, çilek, ananas, 4 pot çikolata" },
+    { name: "Pancake Mix", description: "Mini pankek, muz, çilek, fransız biscuit, sütlü çikolata, antep fıstığı" },
+    { name: "Pancake Şiş", description: "Çubukta mini pankek, muz, çilek, fransız biscuit, sütlü çikolata, antep fıstığı" },
+    { name: "Pancake Fondue", description: "Mini pankek, muz, çilek, 2 pot çikolata" },
+    { name: "Waffle Brüksel", description: "Muz, çilek, sütlü çikolata, fransız biscuit, antep fıstığı" },
+    { name: "Waffle Lotus", description: "Muz, lotus sos, lotus bisküvi parçaları, sütlü çikolata (isteğe göre dondurma)" },
+    { name: "Waffle Fondue", description: "Waffle parçaları, muz, çilek, 2 pot çikolata" },
+    { name: "Double Waffle", description: "Çift kat waffle, muz, çilek, sütlü çikolata, fransız biscuit, antep fıstığı" },
+    { name: "Klasik Cup", description: "Muz, çilek, diplomat krema, fransız biscuit, sütlü çikolata, antep fıstığı" },
+    { name: "Pancake Cup", description: "Mini pankek, çilek, muz, sütlü çikolata, antep fıstığı" },
+    { name: "Crepe Cup", description: "Fettucini krep, muz, çilek, sütlü çikolata, antep fıstığı" },
+    { name: "Dondurmalı Cup", description: "Vanilyalı dondurma, muz, çilek, sütlü çikolata, antep fıstığı" },
+    { name: "Brownie Cup", description: "Brownie parçaları, muz, çilek, ananas, sütlü çikolata, antep fıstığı" },
+    { name: "Oreo Cup", description: "Oreo parçaları, muz, çilek, diplomat krema, fransız biscuit, sütlü çikolata, antep fıstığı" },
+    { name: "Spoonful", description: "Çikolatalı kek parçaları, diplomat krema, pirinç patlağı, sütlü çikolata, antep fıstığı" },
+    { name: "Lotus Cup", description: "Lotus kırıntısı, diplomat krema, lotus sos, muz, fransız biscuit" },
+    { name: "Dubai Cup", description: "Antep fıstıklı çıtır kadayıf harcı, diplomat krema, sütlü çikolata, antep fıstığı" },
+    { name: "Crepe Wraps", description: "Krep, dondurma, muz, çilek, sütlü çikolata, fransız biscuit, antep fıstığı" },
+    { name: "Crepe Fondue", description: "Muza sarılmış krep, 1 pot çikolata, fransız biscuit, antep fıstığı" },
+    { name: "Tiramisu", description: "Espresso, kedi dili, tiramisu kreması, kakao" },
+    { name: "Klasik Magnolia", description: "Muz, çilek, diplomat krema, fransız biscuit, antep fıstığı" },
+    { name: "Oreo Magnolia", description: "Oreo parçaları, diplomat krema, fransız biscuit, antep fıstığı" },
+    { name: "Lotus Magnolia", description: "Lotus parçaları, diplomat krema, fransız biscuit, antep fıstığı" },
+    { name: "Pot çikolata" },
+    { name: "Fransız biscuit" },
+    { name: "Muz" },
+    { name: "Çilek" },
+    { name: "Ananas" },
+    { name: "Sade waffle" },
+    { name: "Sade mini pancake" },
+  ];
+  for (const item of dessertItems) {
+    addMenuItem(simpleDessertCategory.id, item.name, item.description);
+  }
+
+  for (const product of docxMenuItems) {
+    await prisma.menuProduct.upsert({
+      where: { id: product.id },
+      update: {
+        companyId: company.id,
+        branchId: branchA.id,
+        categoryId: product.categoryId,
+        name: product.name,
+        slug: product.slug,
+        description: product.description ?? null,
+        basePrice: 0,
+        isVisible: true,
+        showInQr: true,
+      },
+      create: {
+        id: product.id,
+        companyId: company.id,
+        branchId: branchA.id,
+        categoryId: product.categoryId,
+        name: product.name,
+        slug: product.slug,
+        description: product.description ?? null,
+        basePrice: 0,
+        isVisible: true,
+        showInQr: true,
+      },
+    });
+  }
 
   await prisma.menuProduct.upsert({
     where: { id: "product_flat_white" },
@@ -1955,27 +2268,57 @@ async function main() {
   });
 
   await prisma.tableArea.upsert({
-    where: { id: "area_garden" },
+    where: { id: "area_ground" },
     update: {
       branchId: branchA.id,
-      name: "Bahce",
+      name: "Zemin Kat",
       sortOrder: 1,
     },
     create: {
-      id: "area_garden",
+      id: "area_ground",
       branchId: branchA.id,
-      name: "Bahce",
+      name: "Zemin Kat",
       sortOrder: 1,
     },
   });
+
+  await prisma.tableArea.upsert({
+    where: { id: "area_floor1" },
+    update: {
+      branchId: branchA.id,
+      name: "1. Kat",
+      sortOrder: 2,
+    },
+    create: {
+      id: "area_floor1",
+      branchId: branchA.id,
+      name: "1. Kat",
+      sortOrder: 2,
+    },
+  });
+
+  await prisma.tableArea.upsert({
+    where: { id: "area_floor2" },
+    update: {
+      branchId: branchA.id,
+      name: "2. Kat",
+      sortOrder: 3,
+    },
+    create: {
+      id: "area_floor2",
+      branchId: branchA.id,
+      name: "2. Kat",
+      sortOrder: 3,
+    },
+    });
 
   await prisma.diningTable.upsert({
     where: { id: "table_a1" },
     update: {
       branchId: branchA.id,
-      areaId: "area_garden",
+      areaId: "area_ground",
       code: "A1",
-      name: "Bahce 1",
+      name: "Salon A1",
       colorHex: "#22c55e",
       capacity: 4,
       status: TableStatus.AVAILABLE,
@@ -1983,9 +2326,9 @@ async function main() {
     create: {
       id: "table_a1",
       branchId: branchA.id,
-      areaId: "area_garden",
+      areaId: "area_ground",
       code: "A1",
-      name: "Bahce 1",
+      name: "Salon A1",
       colorHex: "#22c55e",
       capacity: 4,
       status: TableStatus.AVAILABLE,
@@ -1996,9 +2339,9 @@ async function main() {
     where: { id: "table_a2" },
     update: {
       branchId: branchA.id,
-      areaId: "area_garden",
+      areaId: "area_ground",
       code: "A2",
-      name: "Bahce 2",
+      name: "Salon A2",
       colorHex: "#f59e0b",
       capacity: 4,
       status: TableStatus.AVAILABLE,
@@ -2007,15 +2350,50 @@ async function main() {
     create: {
       id: "table_a2",
       branchId: branchA.id,
-      areaId: "area_garden",
+      areaId: "area_ground",
       code: "A2",
-      name: "Bahce 2",
+      name: "Salon A2",
       colorHex: "#f59e0b",
       capacity: 4,
       status: TableStatus.AVAILABLE,
       activeTicketId: null,
     },
   });
+
+  // Extra tables: 10 per floor (A/B/C).
+  const tablePlan: Array<{ areaId: string; prefix: string; labelPrefix: string }> = [
+    { areaId: "area_ground", prefix: "A", labelPrefix: "Salon" },
+    { areaId: "area_floor1", prefix: "B", labelPrefix: "Salon" },
+    { areaId: "area_floor2", prefix: "C", labelPrefix: "Salon" },
+  ];
+  for (const plan of tablePlan) {
+    for (let i = 1; i <= 10; i += 1) {
+      const code = `${plan.prefix}${i}`;
+      const id = `table_${plan.prefix.toLowerCase()}${i}`;
+      await prisma.diningTable.upsert({
+        where: { id },
+        update: {
+          branchId: branchA.id,
+          areaId: plan.areaId,
+          code,
+          name: `${plan.labelPrefix} ${code}`,
+          capacity: 4,
+          status: TableStatus.AVAILABLE,
+          activeTicketId: null,
+        },
+        create: {
+          id,
+          branchId: branchA.id,
+          areaId: plan.areaId,
+          code,
+          name: `${plan.labelPrefix} ${code}`,
+          capacity: 4,
+          status: TableStatus.AVAILABLE,
+          activeTicketId: null,
+        },
+      });
+    }
+  }
 
   await prisma.backScreenSlide.upsert({
     where: { id: "slide_1" },
