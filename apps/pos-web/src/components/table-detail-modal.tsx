@@ -291,13 +291,13 @@ export function PosTableDetailModal({
                 <strong>Hızlı İşlemler</strong>
               </header>
               <div className="pos-quick-grid">
-                <button type="button" className="pos-quick" onClick={onOpenActions} disabled={pending}>
+                <button type="button" className="pos-quick" onClick={onOpenCatalog} disabled={pending}>
                   <span className="pos-quick__icon">
                     <Icon d={icons.plus} />
                   </span>
                   Ürün Ekle
                 </button>
-                <button type="button" className="pos-quick" onClick={onOpenActions} disabled={pending}>
+                <button type="button" className="pos-quick" onClick={onOpenActions} disabled={pending || isWaiterMode}>
                   <span className="pos-quick__icon">
                     <Icon d={icons.money} />
                   </span>
