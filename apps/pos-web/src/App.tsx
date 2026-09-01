@@ -443,7 +443,7 @@ export function App() {
 
   function openDrawer(key: Exclude<PosDrawerKey, null>) {
     if (isWaiterSession(session) && !["ticket", "note", "catalog"].includes(key)) {
-      setError("Garson modunda sadece siparis (urun ekleme) ve not akisina erisilebilir.");
+      setError(`Garson modunda sadece siparis (urun ekleme) ve not akisina erisilebilir. (blok: ${key})`);
       return;
     }
     if ((key === "payment" || key === "actions" || key === "note" || key === "ticket" || key === "catalog") && !selectedTicket) {
