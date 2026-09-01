@@ -3027,7 +3027,12 @@ export function App() {
 
                 {productFlowTab === "options" ? (
                   <div className="product-flow-pane">
-                    {selectedProductVariants.length > 0 ? (
+                    {selectedProductVariants.length > 0 &&
+                    (() => {
+                      const category = categories.find((item) => String(item.id) === String(selectedProduct?.categoryId ?? ""));
+                      const name = String(category?.name ?? "").toLowerCase();
+                      return name.includes("içecek") || name.includes("icecek") || name.includes("kahve");
+                    })() ? (
                       <div className="pos-choice-group">
                         <span>Varyant</span>
                         <div className="pos-chip-grid">

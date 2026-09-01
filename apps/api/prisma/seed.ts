@@ -1263,6 +1263,20 @@ async function main() {
     });
   }
 
+  // Make sure only DOCX products appear in the system for Branch A.
+  await prisma.menuProduct.updateMany({
+    where: {
+      companyId: company.id,
+      branchId: branchA.id,
+      id: { notIn: docxMenuItems.map((item) => item.id) },
+    },
+    data: {
+      isActive: false,
+      isVisible: false,
+      showInQr: false,
+    },
+  });
+
   await prisma.menuProduct.upsert({
     where: { id: "product_flat_white" },
     update: {

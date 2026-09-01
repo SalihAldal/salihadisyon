@@ -11,6 +11,8 @@ export class PosAdminService {
   async getBootstrapConfig(actor: PosActor, query?: { branchId?: string; terminalId?: string }) {
     const branchId = this.resolveBranchId(actor, query?.branchId);
     const requestedTerminalId = query?.terminalId ?? actor.terminalId ?? undefined;
+    const restrictToDocxMenu = actor.tenantId === "cmp_aldal_demo" && Boolean(branchId);
+    const docxCategoryIds = ["menu_cat_simple_icecekler", "menu_cat_simple_kahvalti", "menu_cat_simple_makarna", "menu_cat_simple_tatli"];
 
     const [
       categories,
@@ -27,11 +29,15 @@ export class PosAdminService {
       activeSettings,
     ] = await Promise.all([
       this.prisma.menuCategory.findMany({
-        where: { companyId: actor.tenantId, OR: [{ branchId: null }, { branchId }] },
+        where: restrictToDocxMenu
+          ? { companyId: actor.tenantId, branchId, id: { in: docxCategoryIds }, isVisible: true, showInQr: true }
+          : { companyId: actor.tenantId, OR: [{ branchId: null }, { branchId }], isVisible: true, showInQr: true },
         orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       }),
       this.prisma.menuProduct.findMany({
-        where: { companyId: actor.tenantId, OR: [{ branchId: null }, { branchId }], isVisible: true, isActive: true },
+        where: restrictToDocxMenu
+          ? { companyId: actor.tenantId, branchId, categoryId: { in: docxCategoryIds }, isVisible: true, isActive: true, showInQr: true }
+          : { companyId: actor.tenantId, OR: [{ branchId: null }, { branchId }], isVisible: true, isActive: true, showInQr: true },
         include: { variants: { orderBy: { sortOrder: "asc" } }, branchPrices: true, stockItem: true, recipe: { select: { id: true } } },
         orderBy: [{ categoryId: "asc" }, { name: "asc" }],
       }),
