@@ -1709,12 +1709,17 @@ export function App() {
 
   async function changeQuantity(item: Record<string, any>, diff: number) {
     if (!session || !selectedTicket) return;
-    if (!canMutateCurrentTicketItems) {
-      setError("Garson modunda bu adisyon icin duzenleme kilitli. Sadece yeni urun ekleyebilirsin.");
+    // Garson sadece arttırabilir. Azaltma/silme UI'da kapalı ama ekstra güvenlik.
+    if (isWaiterMode && diff < 0) {
+      setError("Garson modunda miktar azaltma kapalı.");
       return;
     }
     const nextQuantity = Number(item.quantity) + diff;
     if (nextQuantity <= 0) {
+      if (isWaiterMode) {
+        setError("Garson modunda ürün silme kapalı.");
+        return;
+      }
       openConfirm("Urun Sil", "Bu urunu adisyondan silmek istiyor musun?", async () => {
         await posApi.removeItem(session.accessToken, String(selectedTicket.id), String(item.id));
         await loadAll(branchId, String(selectedTicket.id));
@@ -2821,8 +2826,9 @@ export function App() {
   const canViewConnections = hasSessionPermission(session, "device.view");
   const canViewCancelList = hasSessionPermission(session, "reports.view");
 
-  const isCurrentTicketLockedForWaiter = isWaiterMode && selectedTicket?.id ? waiterLockedTicketIds.includes(String(selectedTicket.id)) : false;
-  const canMutateCurrentTicketItems = isWaiterMode ? !isCurrentTicketLockedForWaiter : true;
+  // Garson: ürün ekleyebilir ve miktarı arttırabilir.
+  // Azaltma/silme UI seviyesinde kapalı olduğu için "kilit" miktar arttırmayı engellememeli.
+  const canMutateCurrentTicketItems = true;
   const canOpenRegister = canOpenRegisterPermission && !anyPending && Number.isFinite(openingCashValue) && openingCashValue >= 0;
   const expenseDescription = expenseForm.description.trim();
   const expenseAmountValue = roundCurrency(Number(expenseForm.amount));
