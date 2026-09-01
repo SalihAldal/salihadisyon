@@ -53,18 +53,22 @@ export function resolveActiveTicketId(table: Record<string, any>) {
 }
 
 export function getTableLobbyMeta(table: Record<string, any>, openTicketCount?: number) {
-  const busy = isTableBusy(table);
+  const busyBase = isTableBusy(table);
   const activeTicket = (table.activeTicket as Record<string, any> | undefined) ?? null;
   const itemCount = Array.isArray(activeTicket?.items) ? activeTicket.items.length : 0;
   const grandTotal = Number(activeTicket?.grandTotal ?? 0);
-  const ticketStatus = activeTicket?.status ? String(activeTicket.status) : busy ? "OPEN" : null;
-  const resolvedOpenTicketCount = openTicketCount ?? (busy ? 1 : 0);
+  const hasItems = itemCount > 0;
+  // UI kuralı: ürün eklenmemişse masa "dolu" görünmesin.
+  const busy = busyBase && hasItems;
+  const ticketStatus = activeTicket?.status ? String(activeTicket.status) : busyBase ? "OPEN" : null;
+  const resolvedOpenTicketCount = openTicketCount ?? (busyBase ? 1 : 0);
   const openedAt = activeTicket?.openedAt ? String(activeTicket.openedAt) : null;
   const coverCount = Number(activeTicket?.coverCount ?? 0) || null;
   const billRequested = Boolean(activeTicket?.billRequestedAt);
 
   return {
     busy,
+    hasItems,
     statusLabel: busy ? "Dolu" : "Bos",
     ticketStatusLabel: billRequested ? "Hesap Bekliyor" : ticketStatus ? formatTicketStatus(ticketStatus) : null,
     ticketStatusTone: billRequested ? "warning" : ticketStatus ? getTicketStatusTone(ticketStatus) : "neutral",

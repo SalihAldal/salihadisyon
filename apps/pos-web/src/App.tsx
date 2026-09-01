@@ -442,11 +442,11 @@ export function App() {
   const [syncBusy, setSyncBusy] = useState(false);
 
   function openDrawer(key: Exclude<PosDrawerKey, null>) {
-    if (isWaiterSession(session) && !["ticket", "note"].includes(key)) {
-      setError("Garson modunda sadece adisyon ve not akisina erisilebilir.");
+    if (isWaiterSession(session) && !["ticket", "note", "catalog"].includes(key)) {
+      setError("Garson modunda sadece siparis (urun ekleme) ve not akisina erisilebilir.");
       return;
     }
-    if ((key === "payment" || key === "actions" || key === "note" || key === "ticket") && !selectedTicket) {
+    if ((key === "payment" || key === "actions" || key === "note" || key === "ticket" || key === "catalog") && !selectedTicket) {
       setError("Once aktif bir adisyon sec.");
       return;
     }

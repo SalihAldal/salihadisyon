@@ -87,7 +87,7 @@ export function WaiterTableLobby({ floorLabel, tables, openTickets = [], loading
   const counts = tables.reduce(
     (acc, table) => {
       const status = String(table.status ?? "").toUpperCase();
-      const hasTicket = Boolean(table.activeTicketId ?? table.activeTicket?.id);
+      const meta = getTableLobbyMeta(table, getOpenTicketsForTable(openTickets, String(table.id)).length);
       if (status === "RESERVED") {
         acc.reserved += 1;
         return acc;
@@ -96,7 +96,7 @@ export function WaiterTableLobby({ floorLabel, tables, openTickets = [], loading
         acc.cleaning += 1;
         return acc;
       }
-      if (hasTicket || status === "BUSY" || status === "OCCUPIED") {
+      if (meta.busy || status === "BUSY" || status === "OCCUPIED") {
         acc.busy += 1;
         return acc;
       }
