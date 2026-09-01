@@ -1780,6 +1780,87 @@ async function main() {
     ],
   });
 
+  await prisma.modifierGroup.upsert({
+    where: { id: "modifier_syrup" },
+    update: {
+      companyId: company.id,
+      name: "Surup Secimi",
+      selectionMin: 0,
+      selectionMax: 3,
+    },
+    create: {
+      id: "modifier_syrup",
+      companyId: company.id,
+      name: "Surup Secimi",
+      selectionMin: 0,
+      selectionMax: 3,
+    },
+  });
+
+  await prisma.modifierOption.deleteMany({ where: { groupId: "modifier_syrup" } });
+  await prisma.modifierOption.createMany({
+    data: [
+      { groupId: "modifier_syrup", name: "Vanilya", priceDiff: 0, sortOrder: 0 },
+      { groupId: "modifier_syrup", name: "Karamel", priceDiff: 0, sortOrder: 1 },
+      { groupId: "modifier_syrup", name: "Fındık", priceDiff: 0, sortOrder: 2 },
+      { groupId: "modifier_syrup", name: "Lotus", priceDiff: 0, sortOrder: 3 },
+    ],
+  });
+
+  await prisma.modifierGroup.upsert({
+    where: { id: "modifier_pasta_extras" },
+    update: {
+      companyId: company.id,
+      name: "Makarna Ekstralari",
+      selectionMin: 0,
+      selectionMax: 5,
+    },
+    create: {
+      id: "modifier_pasta_extras",
+      companyId: company.id,
+      name: "Makarna Ekstralari",
+      selectionMin: 0,
+      selectionMax: 5,
+    },
+  });
+
+  await prisma.modifierOption.deleteMany({ where: { groupId: "modifier_pasta_extras" } });
+  await prisma.modifierOption.createMany({
+    data: [
+      { groupId: "modifier_pasta_extras", name: "Ekstra Tavuk", priceDiff: 0, sortOrder: 0 },
+      { groupId: "modifier_pasta_extras", name: "Ekstra Mantar", priceDiff: 0, sortOrder: 1 },
+      { groupId: "modifier_pasta_extras", name: "Ekstra Peynir", priceDiff: 0, sortOrder: 2 },
+      { groupId: "modifier_pasta_extras", name: "Acı Sos", priceDiff: 0, sortOrder: 3 },
+    ],
+  });
+
+  await prisma.modifierGroup.upsert({
+    where: { id: "modifier_breakfast_extras" },
+    update: {
+      companyId: company.id,
+      name: "Kahvalti Ekstralari",
+      selectionMin: 0,
+      selectionMax: 6,
+    },
+    create: {
+      id: "modifier_breakfast_extras",
+      companyId: company.id,
+      name: "Kahvalti Ekstralari",
+      selectionMin: 0,
+      selectionMax: 6,
+    },
+  });
+
+  await prisma.modifierOption.deleteMany({ where: { groupId: "modifier_breakfast_extras" } });
+  await prisma.modifierOption.createMany({
+    data: [
+      { groupId: "modifier_breakfast_extras", name: "Ekstra Menemen", priceDiff: 0, sortOrder: 0 },
+      { groupId: "modifier_breakfast_extras", name: "Ekstra Sucuk", priceDiff: 0, sortOrder: 1 },
+      { groupId: "modifier_breakfast_extras", name: "Ekstra Peynir", priceDiff: 0, sortOrder: 2 },
+      { groupId: "modifier_breakfast_extras", name: "Ekstra Cay", priceDiff: 0, sortOrder: 3 },
+    ],
+  });
+
   await prisma.requiredChoiceGroup.upsert({
     where: { id: "required_size" },
     update: {

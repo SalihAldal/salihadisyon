@@ -204,10 +204,40 @@ export class PosAdminService {
       })),
       products: products.map((product) => {
         const branchPrice = product.branchPrices.find((price) => price.branchId === branchId);
-        const scopedModifierGroups = modifierGroups.filter((group) => {
-          if (!isSweetExtrasGroup(group)) return true;
-          return isSweetCategory(product.categoryId);
-        });
+        const docxCategoryIds = ["menu_cat_simple_icecekler", "menu_cat_simple_kahvalti", "menu_cat_simple_makarna", "menu_cat_simple_tatli"];
+        const restrictToDocxMenu = actor.tenantId === "cmp_aldal_demo" && Boolean(branchId);
+        const isDocxCategory = docxCategoryIds.includes(String(product.categoryId));
+        const productName = String(product.name ?? "").toLowerCase();
+        const productCategoryName = String(categoryMap.get(String(product.categoryId))?.name ?? "").toLowerCase();
+        const isDrinkCategory = String(product.categoryId) === "menu_cat_simple_icecekler" || productCategoryName.includes("içecek") || productCategoryName.includes("icecek");
+        const isBreakfastCategory = String(product.categoryId) === "menu_cat_simple_kahvalti" || productCategoryName.includes("kahvalt");
+        const isPastaCategory = String(product.categoryId) === "menu_cat_simple_makarna" || productCategoryName.includes("makarna");
+        const isDessertCategory = String(product.categoryId) === "menu_cat_simple_tatli" || productCategoryName.includes("tatl");
+        const isCoffeeLike =
+          isDrinkCategory &&
+          ["kahve", "latte", "espresso", "americano", "mocha", "cappuccino", "flat", "macchiato", "chai", "oreo", "toffee", "lotus", "cookie"].some((key) =>
+            productName.includes(key),
+          );
+
+        const allowedModifierGroupIds = restrictToDocxMenu && isDocxCategory
+          ? [
+              ...(isCoffeeLike ? ["modifier_milk", "modifier_syrup"] : []),
+              ...(isPastaCategory ? ["modifier_pasta_extras"] : []),
+              ...(isBreakfastCategory ? ["modifier_breakfast_extras"] : []),
+              ...(isDessertCategory ? ["modifier_tatli_extras"] : []),
+            ]
+          : null;
+        const scopedModifierGroups = allowedModifierGroupIds
+          ? modifierGroups.filter((group) => allowedModifierGroupIds.includes(group.id))
+          : modifierGroups.filter((group) => {
+              if (!isSweetExtrasGroup(group)) return true;
+              return isSweetCategory(product.categoryId);
+            });
+
+        const scopedRequiredChoiceGroups =
+          restrictToDocxMenu && isDocxCategory
+            ? requiredChoiceGroups.filter((group) => (isCoffeeLike ? group.id === "required_size" : false))
+            : requiredChoiceGroups;
         return {
           id: product.id,
           categoryId: product.categoryId,
@@ -236,7 +266,7 @@ export class PosAdminService {
               stockTracked: Boolean(option.inventoryItemId && Number(option.stockQuantity ?? 0) > 0),
             })),
           })),
-          requiredChoiceGroups: requiredChoiceGroups.map((group) => ({
+          requiredChoiceGroups: scopedRequiredChoiceGroups.map((group) => ({
             id: group.id,
             name: group.name,
             selectionMin: group.selectionMin,
