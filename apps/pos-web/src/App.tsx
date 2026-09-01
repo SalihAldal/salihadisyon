@@ -3000,7 +3000,12 @@ export function App() {
                     className={productFlowTab === "modifiers" ? "active" : ""}
                     onClick={() => setProductFlowTab("modifiers")}
                   >
-                    Suruplar
+                    {(() => {
+                      const category = categories.find((item) => String(item.id) === String(selectedProduct?.categoryId ?? ""));
+                      const name = String(category?.name ?? "").toLowerCase();
+                      const isDrink = name.includes("içecek") || name.includes("icecek") || name.includes("kahve");
+                      return isDrink ? "Suruplar" : "Ekstralar";
+                    })()}
                   </button>
                   {extraGroups.length > 0 ? (
                     <button
