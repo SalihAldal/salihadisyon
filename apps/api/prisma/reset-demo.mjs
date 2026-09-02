@@ -57,6 +57,6 @@ console.log("Prisma client yeniden uretiliyor...");
 run("pnpm", ["exec", "prisma", "generate", "--schema", "prisma/schema.prisma"]);
 
 console.log("Demo veriler tekrar yukleniyor...");
-run("pnpm", ["exec", "ts-node", "prisma/seed.ts"]);
+run("pnpm", ["exec", "ts-node", "prisma/seed-minimal.ts"]);
 
 console.log("Demo reset tamamlandi.");

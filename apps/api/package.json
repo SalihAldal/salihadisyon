@@ -16,12 +16,12 @@
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:migrate:status": "prisma migrate status --schema prisma/schema.prisma",
-    "prisma:seed": "ts-node prisma/seed.ts",
-    "prisma:demo:seed": "ts-node prisma/seed.ts",
+    "prisma:seed": "ts-node prisma/seed-minimal.ts",
+    "prisma:demo:seed": "ts-node prisma/seed-minimal.ts",
     "prisma:demo:reset": "node prisma/reset-demo.mjs"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed-minimal.ts"
   },
   "dependencies": {
     "@adisyon/config": "workspace:*",
