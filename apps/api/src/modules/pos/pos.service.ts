@@ -520,12 +520,53 @@ export class PosService {
   }
 
   async updateItem(ticketId: string, itemId: string, dto: UpdateTicketItemDto, actor: PosActor) {
-    this.ensureWaiterCanRun(actor, "Urun duzenleme");
     const ticket = await this.getTicketOrThrow(ticketId, actor);
     this.ensureTicketEditable(ticket);
     const item = await this.prisma.ticketItem.findUnique({ where: { id: itemId } });
     if (!item || item.ticketId !== ticketId) {
       throw new NotFoundException("Adisyon satiri bulunamadi.");
+    }
+
+    // Garson kuralı:
+    // - Ürün ekleyebilir (addItem zaten serbest)
+    // - Miktarı sadece arttırabilir
+    // - Satırın not/modifier/variant/required seçimlerini değiştiremez
+    if (this.isWaiterRole(actor)) {
+      const nextQuantity = dto.quantity;
+      if (nextQuantity === undefined) {
+        throw new ForbiddenException("Garson modunda sadece miktar arttirma serbest.");
+      }
+      if (Number(nextQuantity) < Number(item.quantity)) {
+        throw new ForbiddenException("Garson modunda miktar azaltma kapali.");
+      }
+
+      const currentModifiers = (item.modifiersJson ?? {}) as Record<string, unknown>;
+      const currentVariantIds = ((currentModifiers.variantIds as string[]) ?? []).map(String);
+      const currentModifierOptionIds = ((currentModifiers.modifierOptionIds as string[]) ?? []).map(String);
+      const currentRequiredChoiceOptionIds = ((currentModifiers.requiredChoiceOptionIds as string[]) ?? []).map(String);
+
+      const normalizeList = (input: string[]) => [...input].map(String).sort();
+      const listEquals = (a: string[], b: string[]) => {
+        const aa = normalizeList(a);
+        const bb = normalizeList(b);
+        if (aa.length !== bb.length) return false;
+        return aa.every((value, idx) => value === bb[idx]);
+      };
+
+      const noteMatches = dto.note === undefined || String(dto.note ?? "") === String(item.notes ?? "");
+      const variantsMatch = dto.variantIds === undefined || listEquals((dto.variantIds ?? []).map(String), currentVariantIds);
+      const modifiersMatch =
+        dto.modifierOptionIds === undefined || listEquals((dto.modifierOptionIds ?? []).map(String), currentModifierOptionIds);
+      const requiredMatch =
+        dto.requiredChoiceOptionIds === undefined ||
+        listEquals((dto.requiredChoiceOptionIds ?? []).map(String), currentRequiredChoiceOptionIds);
+
+      if (!noteMatches || !variantsMatch || !modifiersMatch || !requiredMatch) {
+        throw new ForbiddenException("Garson modunda urun secenekleri/not/modifier degistirme kapali.");
+      }
+    } else {
+      // Garson olmayanlar için mevcut davranış.
+      this.ensureWaiterCanRun(actor, "Urun duzenleme");
     }
 
     await this.prisma.$transaction(async (tx) => {
