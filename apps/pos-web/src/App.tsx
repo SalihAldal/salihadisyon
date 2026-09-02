@@ -323,6 +323,7 @@ function buildKitchenContent(
 export function App() {
   const configCacheRef = useRef<Map<string, { data: Record<string, any>; cachedAt: number }>>(new Map());
   const syncInFlightRef = useRef(false);
+  const postCreateActionRef = useRef<null | "open_catalog">(null);
   const refreshTimerRef = useRef<number | null>(null);
   const offlineSyncStateRef = useRef<OfflineSyncState>(readOfflineSyncState());
   const [session, setSession] = useState<PosAuthSession | null>(() => readStoredSession());
@@ -441,12 +442,72 @@ export function App() {
   const [offlineSyncState, setOfflineSyncState] = useState<OfflineSyncState>(() => readOfflineSyncState());
   const [syncBusy, setSyncBusy] = useState(false);
 
+  useEffect(() => {
+    if (postCreateActionRef.current !== "open_catalog") return;
+    if (!selectedTicket) return;
+    postCreateActionRef.current = null;
+    setInfo(null);
+    setError(null);
+    setActiveDrawer("catalog");
+  }, [selectedTicket?.id]);
+
+  async function selectTicketSilently(ticketId: string) {
+    if (!session) return;
+    if (isOfflineTicketId(ticketId)) {
+      applyOfflineTicketSelection(ticketId);
+      setMode("TABLE");
+      return;
+    }
+    const detail = await posApi.ticketDetail(session.accessToken, ticketId);
+    setSelectedTicket(detail);
+    setMode("TABLE");
+  }
+
+  async function openCatalogFlow() {
+    if (!session) return;
+    const tableId = String(selectedTableContext?.id ?? selectedTicket?.tableId ?? "");
+    if (!tableId) {
+      setError(isWaiterSession(session) ? "Once masa sec." : "Once aktif bir adisyon sec.");
+      return;
+    }
+
+    const tableTickets = resolveTableOpenTickets(tableId);
+    if (tableTickets.length > 1 && !selectedTicket) {
+      setError("Bu masada birden fazla adisyon var. Once hangi adisyona urun eklenecegini sec.");
+      setActiveDrawer("ticket");
+      return;
+    }
+    if (tableTickets.length === 1 && !selectedTicket) {
+      await selectTicketSilently(String(tableTickets[0].id));
+      setActiveDrawer("catalog");
+      return;
+    }
+
+    if (!selectedTicket) {
+      postCreateActionRef.current = "open_catalog";
+      setInfo("Adisyon aciliyor...");
+      await handleCreateTicket("TABLE", tableId);
+      return;
+    }
+
+    setActiveDrawer("catalog");
+  }
+
   function openDrawer(key: Exclude<PosDrawerKey, null>) {
     if (isWaiterSession(session) && !["ticket", "note", "catalog"].includes(key)) {
       setError(`Garson modunda sadece siparis (urun ekleme) ve not akisina erisilebilir. (blok: ${key})`);
       return;
     }
-    if ((key === "payment" || key === "actions" || key === "note" || key === "ticket" || key === "catalog") && !selectedTicket) {
+    if (key === "catalog" && !selectedTicket) {
+      if (Boolean(pendingOps.createTicket) && (selectedTableContext?.id || selectedTicket?.tableId)) {
+        postCreateActionRef.current = "open_catalog";
+        setInfo("Adisyon aciliyor...");
+        return;
+      }
+      void openCatalogFlow();
+      return;
+    }
+    if ((key === "payment" || key === "actions" || key === "note" || key === "ticket") && !selectedTicket) {
       setError("Once aktif bir adisyon sec.");
       return;
     }
@@ -1496,25 +1557,27 @@ export function App() {
       ticketName: nextMode === "TABLE" ? undefined : `${nextMode} / ${new Date().toLocaleTimeString("tr-TR")}`,
     };
 
-    try {
-      const created = await posApi.createTicket(session.accessToken, payload);
-      setMode(nextMode);
-      await loadAll(branchId, String(created.id));
-    } catch (createError) {
-      if (!isQueueableOfflineError(createError)) {
-        throw createError;
+    await runOp("createTicket", async () => {
+      try {
+        const created = await posApi.createTicket(session.accessToken, payload);
+        setMode(nextMode);
+        await loadAll(branchId, String(created.id));
+      } catch (createError) {
+        if (!isQueueableOfflineError(createError)) {
+          throw createError;
+        }
+        const offlineTicket = buildOfflineTicket(nextMode, tableId);
+        upsertOfflineTicket(offlineTicket);
+        enqueueOfflineOperation("create_ticket", offlineTicket.id, payload);
+        setMode(nextMode);
+        setSelectedTicket(offlineTicket);
+        emitPosToast({
+          tone: "warning",
+          title: "Offline Adisyon",
+          message: "Baglanti olmadigi icin adisyon lokal olarak acildi. Internet gelince otomatik sync edilecek.",
+        });
       }
-      const offlineTicket = buildOfflineTicket(nextMode, tableId);
-      upsertOfflineTicket(offlineTicket);
-      enqueueOfflineOperation("create_ticket", offlineTicket.id, payload);
-      setMode(nextMode);
-      setSelectedTicket(offlineTicket);
-      emitPosToast({
-        tone: "warning",
-        title: "Offline Adisyon",
-        message: "Baglanti olmadigi icin adisyon lokal olarak acildi. Internet gelince otomatik sync edilecek.",
-      });
-    }
+    });
   }
 
   async function openTicketById(ticketId: string) {
