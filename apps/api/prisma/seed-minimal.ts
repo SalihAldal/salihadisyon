@@ -179,6 +179,21 @@ async function main() {
     },
   });
 
+  const demoWaiterPasswordHash = await hash("Waiter123!", 10);
+  const demoWaiter = await prisma.user.upsert({
+    where: { email: "waiter.demo@aldal.local" },
+    update: { passwordHash: demoWaiterPasswordHash, companyId: company.id, defaultBranchId: branch.id },
+    create: {
+      companyId: company.id,
+      defaultBranchId: branch.id,
+      fullName: "Demo Garson",
+      email: "waiter.demo@aldal.local",
+      phone: "+90 555 000 00 04",
+      passwordHash: demoWaiterPasswordHash,
+      isActive: true,
+    },
+  });
+
   const superAdminPasswordHash = await hash("SuperAdmin123!", 10);
   const superAdmin = await prisma.user.upsert({
     where: { email: "superadmin@aldal.local" },
@@ -211,7 +226,7 @@ async function main() {
   });
 
   await prisma.userRole.deleteMany({
-    where: { userId: { in: [owner.id, manager.id, cashier.id, waiter.id, superAdmin.id] } },
+    where: { userId: { in: [owner.id, manager.id, cashier.id, waiter.id, demoWaiter.id, superAdmin.id] } },
   });
 
   if (tenantOwnerRole) await prisma.userRole.create({ data: { userId: owner.id, roleId: tenantOwnerRole.id } });
@@ -222,6 +237,8 @@ async function main() {
     await prisma.userRole.create({ data: { userId: cashier.id, roleId: cashierRole.id, branchId: branch.id } });
   if (waiterRole)
     await prisma.userRole.create({ data: { userId: waiter.id, roleId: waiterRole.id, branchId: branch.id } });
+  if (waiterRole)
+    await prisma.userRole.create({ data: { userId: demoWaiter.id, roleId: waiterRole.id, branchId: branch.id } });
 
   // ----------------------------------------------------------------------------
   // Menü — yalnızca DOCX menüleri (4 kategori)

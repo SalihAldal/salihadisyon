@@ -1056,6 +1056,24 @@ export function App() {
     setActiveDrawer((current) => (current === key ? null : key));
   }
 
+  function logoutSession() {
+    window.localStorage.removeItem(POS_STORAGE_KEY);
+    configCacheRef.current.clear();
+    if (refreshTimerRef.current) {
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    setError(null);
+    setInfo(null);
+    setSelectedProduct(null);
+    setSelectedItemId(null);
+    setSelectedTableContext(null);
+    setSelectedTicket(null);
+    setActiveDrawer(null);
+    setBranchId("");
+    setSession(null);
+  }
+
   function expireSession() {
     window.localStorage.removeItem(POS_STORAGE_KEY);
     configCacheRef.current.clear();
@@ -1066,6 +1084,7 @@ export function App() {
     setSession(null);
     setBranchId("");
     setSelectedTicket(null);
+    setSelectedTableContext(null);
     setError("Oturum suresi doldu. Lutfen tekrar giris yapin.");
   }
 
@@ -2864,6 +2883,7 @@ export function App() {
         onSearchChange={setSearch}
         modeLabel={isWaiterMode ? "Garson Modu" : undefined}
         userLabel={session?.user.fullName ?? ""}
+        onLogout={logoutSession}
       />
       {(error || info || anyPending) ? (
         <div className="pos-runtime-status">

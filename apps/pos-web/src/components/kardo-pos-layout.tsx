@@ -28,12 +28,14 @@ export function PosTopbar({
   onSearchChange,
   modeLabel,
   userLabel,
+  onLogout,
 }: {
   caption: string;
   search: string;
   onSearchChange: (value: string) => void;
   modeLabel?: string;
   userLabel?: string;
+  onLogout?: () => void;
 }) {
   return (
     <header className="pos-topbar">
@@ -60,6 +62,11 @@ export function PosTopbar({
           </span>
           <IconBell />
         </button>
+        {onLogout ? (
+          <button type="button" className="pos-logout-btn" onClick={onLogout}>
+            Çıkış
+          </button>
+        ) : null}
         <div className="pos-user-pill" title={userLabel ?? caption}>
           <span className="pos-user-pill__avatar">{String(userLabel ?? caption ?? "M").trim().slice(0, 1).toUpperCase()}</span>
           <span className="pos-user-pill__meta">
