@@ -241,6 +241,68 @@ async function main() {
     await prisma.userRole.create({ data: { userId: demoWaiter.id, roleId: waiterRole.id, branchId: branch.id } });
 
   // ----------------------------------------------------------------------------
+  // POS PIN login (EmployeeProfile + PIN)
+  // Not: POS girisi, EmployeeProfile.pinCodeEnc alanini base64(plainPin) olarak bekliyor.
+  // ----------------------------------------------------------------------------
+  const pinWaiter = "1111";
+  const pinDemoWaiter = "2222";
+  const encodePin = (pin: string) => Buffer.from(pin, "utf8").toString("base64");
+
+  await prisma.employeeProfile.upsert({
+    where: { branchId_employeeCode: { branchId: branch.id, employeeCode: "W001" } },
+    update: {
+      companyId: company.id,
+      branchId: branch.id,
+      userId: waiter.id,
+      pinCodeEnc: encodePin(pinWaiter),
+      staffRoleId: waiterRole?.id ?? null,
+      department: "Servis",
+      title: "Garson",
+      restaurantRole: "waiter",
+      isActive: true,
+    },
+    create: {
+      companyId: company.id,
+      branchId: branch.id,
+      userId: waiter.id,
+      employeeCode: "W001",
+      pinCodeEnc: encodePin(pinWaiter),
+      staffRoleId: waiterRole?.id ?? null,
+      department: "Servis",
+      title: "Garson",
+      restaurantRole: "waiter",
+      isActive: true,
+    },
+  });
+
+  await prisma.employeeProfile.upsert({
+    where: { branchId_employeeCode: { branchId: branch.id, employeeCode: "W002" } },
+    update: {
+      companyId: company.id,
+      branchId: branch.id,
+      userId: demoWaiter.id,
+      pinCodeEnc: encodePin(pinDemoWaiter),
+      staffRoleId: waiterRole?.id ?? null,
+      department: "Servis",
+      title: "Garson",
+      restaurantRole: "waiter",
+      isActive: true,
+    },
+    create: {
+      companyId: company.id,
+      branchId: branch.id,
+      userId: demoWaiter.id,
+      employeeCode: "W002",
+      pinCodeEnc: encodePin(pinDemoWaiter),
+      staffRoleId: waiterRole?.id ?? null,
+      department: "Servis",
+      title: "Garson",
+      restaurantRole: "waiter",
+      isActive: true,
+    },
+  });
+
+  // ----------------------------------------------------------------------------
   // Menü — yalnızca DOCX menüleri (4 kategori)
   // ----------------------------------------------------------------------------
   const simpleDrinksCategory = await prisma.menuCategory.upsert({
@@ -666,7 +728,7 @@ async function main() {
   console.log("Seed tamamlandi (minimal):", {
     company: company.name,
     branch: branch.name,
-    users: [owner.email, manager.email, cashier.email, waiter.email, superAdmin.email],
+    users: [owner.email, manager.email, cashier.email, waiter.email, demoWaiter.email, superAdmin.email],
     superAdmin: { email: superAdmin.email, password: "SuperAdmin123!" },
   });
 }
